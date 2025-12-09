@@ -25,16 +25,24 @@ module.exports = {
   rebuildConfig: {},
   makers: [
     {
-      name: '@electron-forge/maker-dmg'
+      name: '@electron-forge/maker-dmg',
+      config: {
+        // DMG configuration for macOS
+        background: undefined,
+        format: 'UDZO'
+      }
     },
-    // {
-    //   name: '@electron-forge/maker-squirrel',
-    //   config: {},
-    // },
-    // {
-    //   name: '@electron-forge/maker-zip',
-    //   platforms: ['darwin'],
-    // },
+    {
+      name: '@electron-forge/maker-zip',
+      platforms: ['darwin']
+    },
+    {
+      name: '@electron-forge/maker-squirrel',
+      config: {
+        // Windows installer configuration
+        name: 'muesli'
+      }
+    },
     // {
     //   name: '@electron-forge/maker-deb',
     //   config: {},

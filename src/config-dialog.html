@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Configure API Key</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: #f9f9f9;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      padding: 20px;
+    }
+    
+    .config-container {
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+      padding: 40px;
+      max-width: 500px;
+      width: 100%;
+    }
+    
+    .config-header {
+      margin-bottom: 30px;
+    }
+    
+    .config-header h1 {
+      font-size: 24px;
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 8px;
+    }
+    
+    .config-header p {
+      font-size: 14px;
+      color: #666;
+      line-height: 1.5;
+    }
+    
+    .form-group {
+      margin-bottom: 24px;
+    }
+    
+    .form-group label {
+      display: block;
+      font-size: 14px;
+      font-weight: 500;
+      color: #333;
+      margin-bottom: 8px;
+    }
+    
+    .form-group input {
+      width: 100%;
+      padding: 12px;
+      font-size: 14px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      transition: border-color 0.2s;
+    }
+    
+    .form-group input:focus {
+      outline: none;
+      border-color: #6947BD;
+    }
+    
+    .form-group .help-text {
+      font-size: 12px;
+      color: #999;
+      margin-top: 6px;
+    }
+    
+    .button-group {
+      display: flex;
+      gap: 12px;
+      margin-top: 32px;
+    }
+    
+    .btn {
+      flex: 1;
+      padding: 12px 24px;
+      font-size: 14px;
+      font-weight: 500;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    
+    .btn-primary {
+      background: #6947BD;
+      color: white;
+    }
+    
+    .btn-primary:hover {
+      background: #5a3aa3;
+    }
+    
+    .btn-primary:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    
+    .btn-secondary {
+      background: #f0f0f0;
+      color: #333;
+    }
+    
+    .btn-secondary:hover {
+      background: #e0e0e0;
+    }
+    
+    .error-message {
+      background: #fee;
+      color: #c33;
+      padding: 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      margin-bottom: 20px;
+      display: none;
+    }
+    
+    .error-message.show {
+      display: block;
+    }
+    
+    .success-message {
+      background: #efe;
+      color: #3c3;
+      padding: 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      margin-bottom: 20px;
+      display: none;
+    }
+    
+    .success-message.show {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div class="config-container">
+    <div class="config-header">
+      <h1>Welcome to Muesli</h1>
+      <p>Please enter your Recall.ai API key to get started. You can find your API key in your Recall.ai dashboard.</p>
+    </div>
+    
+    <div class="error-message" id="errorMessage"></div>
+    <div class="success-message" id="successMessage"></div>
+    
+    <form id="configForm">
+      <div class="form-group">
+        <label for="apiKey">API Key *</label>
+        <input 
+          type="password" 
+          id="apiKey" 
+          name="apiKey" 
+          placeholder="Enter your Recall.ai API key"
+          required
+          autocomplete="off"
+        />
+        <div class="help-text">Your API key will be stored securely on your device.</div>
+      </div>
+      
+      <div class="form-group">
+        <label for="apiUrl">API URL</label>
+        <input 
+          type="text" 
+          id="apiUrl" 
+          name="apiUrl" 
+          placeholder="https://us-west-2.recall.ai"
+          value="https://us-west-2.recall.ai"
+        />
+        <div class="help-text">Default: https://us-west-2.recall.ai</div>
+      </div>
+      
+      <div class="button-group">
+        <button type="submit" class="btn btn-primary" id="saveBtn">Save & Continue</button>
+      </div>
+    </form>
+  </div>
+  
+  <script>
+    const { ipcRenderer } = require('electron');
+    
+    const form = document.getElementById('configForm');
+    const apiKeyInput = document.getElementById('apiKey');
+    const apiUrlInput = document.getElementById('apiUrl');
+    const saveBtn = document.getElementById('saveBtn');
+    const errorMessage = document.getElementById('errorMessage');
+    const successMessage = document.getElementById('successMessage');
+    
+    function showError(message) {
+      errorMessage.textContent = message;
+      errorMessage.classList.add('show');
+      successMessage.classList.remove('show');
+    }
+    
+    function showSuccess(message) {
+      successMessage.textContent = message;
+      successMessage.classList.add('show');
+      errorMessage.classList.remove('show');
+    }
+    
+    function hideMessages() {
+      errorMessage.classList.remove('show');
+      successMessage.classList.remove('show');
+    }
+    
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      hideMessages();
+      
+      const apiKey = apiKeyInput.value.trim();
+      const apiUrl = apiUrlInput.value.trim() || 'https://us-west-2.recall.ai';
+      
+      if (!apiKey) {
+        showError('Please enter your API key');
+        return;
+      }
+      
+      // Validate URL format
+      try {
+        new URL(apiUrl);
+      } catch (err) {
+        showError('Please enter a valid API URL');
+        return;
+      }
+      
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving...';
+      
+      try {
+        // Send config to main process
+        const result = await ipcRenderer.invoke('save-api-config', apiKey, apiUrl);
+        
+        if (result.success) {
+          showSuccess('Configuration saved successfully!');
+          setTimeout(() => {
+            // Close the config window
+            ipcRenderer.send('config-saved');
+          }, 500);
+        } else {
+          showError(result.error || 'Failed to save configuration');
+          saveBtn.disabled = false;
+          saveBtn.textContent = 'Save & Continue';
+        }
+      } catch (error) {
+        showError('An error occurred: ' + error.message);
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save & Continue';
+      }
+    });
+    
+    // Focus on API key input when window loads
+    window.addEventListener('load', () => {
+      apiKeyInput.focus();
+    });
+  </script>
+</body>
+</html>
+

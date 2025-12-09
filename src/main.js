@@ -6,7 +6,7 @@ const RecallAiSdk = require('@recallai/desktop-sdk');
 const axios = require('axios');
 const OpenAI = require('openai');
 const sdkLogger = require('./sdk-logger');
-require('dotenv').config();
+const config = require('./config');
 
 // Function to get the OpenRouter headers
 function getHeaderLines() {
@@ -17,9 +17,10 @@ function getHeaderLines() {
 }
 
 // Initialize OpenAI client with OpenRouter as the base URL
-const openai = new OpenAI({
+// Note: OpenRouter key is optional, so we'll initialize it even if not set
+let openai = new OpenAI({
   baseURL: "https://openrouter.ai/api/v1",
-  apiKey: process.env.OPENROUTER_KEY,
+  apiKey: null, // Will be set from config if available
   defaultHeaders: {
     "HTTP-Referer": "https://recall.ai",
     "X-Title": "Muesli AI Notetaker"
@@ -42,6 +43,7 @@ if (require('electron-squirrel-startup')) {
 let detectedMeeting = null;
 
 let mainWindow;
+let configWindow = null;
 
 const createWindow = () => {
   // Create the browser window.
@@ -88,13 +90,104 @@ const createWindow = () => {
   });
 };
 
+// Create configuration dialog window
+const createConfigWindow = () => {
+  configWindow = new BrowserWindow({
+    width: 600,
+    height: 500,
+    resizable: false,
+    modal: true,
+    show: false,
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false,
+    },
+    titleBarStyle: 'hiddenInset',
+    backgroundColor: '#f9f9f9',
+  });
+
+  // Load the config dialog HTML - try multiple possible paths
+  const possiblePaths = [
+    path.join(__dirname, 'config-dialog.html'),
+    path.join(__dirname, '..', 'src', 'config-dialog.html'),
+    path.join(app.getAppPath(), 'src', 'config-dialog.html'),
+  ];
+  
+  let htmlPath = null;
+  for (const possiblePath of possiblePaths) {
+    if (fs.existsSync(possiblePath)) {
+      htmlPath = possiblePath;
+      break;
+    }
+  }
+  
+  if (htmlPath) {
+    configWindow.loadFile(htmlPath);
+  } else {
+    console.error('Config dialog HTML not found. Tried paths:', possiblePaths);
+    // Fallback: create a simple HTML content
+    configWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(`
+      <!DOCTYPE html>
+      <html>
+      <head><meta charset="UTF-8"><title>Configure API Key</title></head>
+      <body style="font-family: sans-serif; padding: 40px;">
+        <h1>Configure API Key</h1>
+        <p>Please enter your Recall.ai API key:</p>
+        <input type="password" id="apiKey" placeholder="API Key" style="width: 100%; padding: 10px; margin: 10px 0;">
+        <input type="text" id="apiUrl" placeholder="API URL" value="https://us-west-2.recall.ai" style="width: 100%; padding: 10px; margin: 10px 0;">
+        <button onclick="saveConfig()" style="padding: 10px 20px; background: #6947BD; color: white; border: none; cursor: pointer;">Save</button>
+        <script>
+          const { ipcRenderer } = require('electron');
+          async function saveConfig() {
+            const apiKey = document.getElementById('apiKey').value;
+            const apiUrl = document.getElementById('apiUrl').value || 'https://us-west-2.recall.ai';
+            if (apiKey) {
+              await ipcRenderer.invoke('save-api-config', apiKey, apiUrl);
+              ipcRenderer.send('config-saved');
+            }
+          }
+        </script>
+      </body>
+      </html>
+    `));
+  }
+
+  configWindow.once('ready-to-show', () => {
+    configWindow.show();
+  });
+
+  configWindow.on('closed', () => {
+    configWindow = null;
+  });
+
+  return configWindow;
+};
+
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(() => {
+  // Check if API key is configured
+  if (!config.isConfigured()) {
+    console.log("API key not configured, showing config dialog");
+    createConfigWindow();
+    return; // Don't proceed until config is saved
+  }
+
+  // Initialize app with configured API key
+  initializeApp();
+});
+
+// Initialize the app after configuration is complete
+function initializeApp() {
   console.log("Registering IPC handlers...");
   // Log all registered IPC handlers
   console.log("IPC handlers:", Object.keys(ipcMain._invokeHandlers));
+  
+  // Load API configuration
+  const apiKey = config.getApiKey();
+  const apiUrl = config.getApiUrl();
+  console.log(`Using API URL: ${apiUrl}`);
 
   // Set up SDK logger IPC handlers
   ipcMain.on('sdk-log', (event, logEntry) => {
@@ -130,8 +223,8 @@ app.whenReady().then(() => {
     console.error("Couldn't create the meetings file:", e);
   }
 
-  // Initialize the Recall.ai SDK
-  initSDK();
+  // Initialize the Recall.ai SDK (only on supported platforms)
+  initSDK(apiUrl);
 
   createWindow();
 
@@ -148,7 +241,7 @@ app.whenReady().then(() => {
       createWindow();
     }
   });
-});
+}
 
 // Quit when all windows are closed, except on macOS. There, it's common
 // for applications and their menu bar to stay active until the user quits
@@ -350,27 +443,53 @@ async function createDesktopSdkUpload() {
   }
 }
 
+// Track if SDK is available (only supported on macOS and Windows)
+const isSDKSupported = process.platform === 'darwin' || process.platform === 'win32';
+let isSDKInitialized = false;
+
 // Initialize the Recall.ai SDK
-function initSDK() {
+function initSDK(apiUrl) {
+  // Check if platform is supported
+  if (!isSDKSupported) {
+    console.warn(`Recall.ai Desktop SDK is not supported on platform: ${process.platform}. SDK features will be disabled.`);
+    console.warn('Supported platforms: macOS (darwin), Windows (win32)');
+    return;
+  }
+
   console.log("Initializing Recall.ai SDK");
 
-  // Log the SDK initialization
-  sdkLogger.logApiCall('init', {
-    dev: process.env.NODE_ENV === 'development',
-    api_url: process.env.RECALLAI_API_URL,
-    config: {
-      recording_path: RECORDING_PATH
-    }
-  });
+  try {
+    // Log the SDK initialization
+    sdkLogger.logApiCall('init', {
+      dev: process.env.NODE_ENV === 'development',
+      api_url: apiUrl,
+      config: {
+        recording_path: RECORDING_PATH
+      }
+    });
 
-  RecallAiSdk.init({
-    // dev: true,
-    api_url: process.env.RECALLAI_API_URL,
-    config: {
-      recording_path: RECORDING_PATH
-    }
-  });
+    RecallAiSdk.init({
+      // dev: true,
+      api_url: apiUrl,
+      config: {
+        recording_path: RECORDING_PATH
+      }
+    });
 
+    isSDKInitialized = true;
+
+    // Only register event listeners if SDK initialization succeeded
+    setupSDKEventListeners();
+  } catch (error) {
+    console.error('Failed to initialize Recall.ai SDK:', error);
+    console.warn('SDK features will be disabled due to initialization failure.');
+    isSDKInitialized = false;
+    return; // Exit early if initialization failed
+  }
+}
+
+// Setup SDK event listeners (only called after successful initialization)
+function setupSDKEventListeners() {
   // Listen for meeting detected events
   RecallAiSdk.addEventListener('meeting-detected', (evt) => {
     console.log("Meeting detected:", evt);
@@ -685,6 +804,36 @@ function initSDK() {
   });
 }
 
+// Export SDK availability status for use in other parts of the code
+function isSDKAvailable() {
+  return isSDKSupported && isSDKInitialized;
+}
+
+// Handle saving API configuration
+ipcMain.handle('save-api-config', async (event, apiKey, apiUrl) => {
+  try {
+    const success = config.saveConfig(apiKey, apiUrl);
+    if (success) {
+      console.log('API configuration saved successfully');
+      return { success: true };
+    } else {
+      return { success: false, error: 'Failed to save configuration' };
+    }
+  } catch (error) {
+    console.error('Error saving API config:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Handle config saved event from config dialog
+ipcMain.on('config-saved', () => {
+  if (configWindow) {
+    configWindow.close();
+  }
+  // Initialize the app now that config is saved
+  initializeApp();
+});
+
 // Handle saving meetings data
 ipcMain.handle('saveMeetingsData', async (event, data) => {
   try {
@@ -902,6 +1051,14 @@ ipcMain.handle('startManualRecording', async (event, meetingId) => {
     const meeting = meetingsData.pastMeetings[pastMeetingIndex];
 
     try {
+      // Check if SDK is supported and initialized
+      if (!isSDKSupported || !isSDKInitialized) {
+        return { 
+          success: false, 
+          error: `Desktop recording is not supported on ${process.platform}. The Recall.ai Desktop SDK only supports macOS and Windows.` 
+        };
+      }
+
       // Prepare desktop audio recording - this is the key difference from our previous implementation
       // It returns a key that we use as the window ID
 
@@ -970,6 +1127,14 @@ ipcMain.handle('startManualRecording', async (event, meetingId) => {
 ipcMain.handle('stopManualRecording', async (event, recordingId) => {
   try {
     console.log(`Stopping manual desktop recording: ${recordingId}`);
+
+    // Check if SDK is supported and initialized
+    if (!isSDKSupported || !isSDKInitialized) {
+      return { 
+        success: false, 
+        error: `Desktop recording is not supported on ${process.platform}. The Recall.ai Desktop SDK only supports macOS and Windows.` 
+      };
+    }
 
     // Stop the recording - using the windowId property as shown in the reference
 
@@ -1209,6 +1374,12 @@ async function createMeetingNoteAndRecord(platformName) {
 
     // Start recording with upload token
     console.log('Starting recording for meeting:', detectedMeeting.window.id);
+
+    // Check if SDK is supported and initialized before attempting to record
+    if (!isSDKSupported || !isSDKInitialized) {
+      console.warn(`Cannot start recording: SDK not available on ${process.platform}`);
+      return id; // Return the meeting ID even though recording won't start
+    }
 
     try {
       // Get upload token
