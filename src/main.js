@@ -174,6 +174,13 @@ app.whenReady().then(() => {
     return; // Don't proceed until config is saved
   }
 
+  // API key is already configured
+  const apiKey = config.getApiKey();
+  const apiUrl = config.getApiUrl();
+  console.log("API key already configured");
+  console.log(`Using API URL: ${apiUrl}`);
+  console.log(`API Key: ${apiKey ? apiKey.substring(0, 8) + '...' : 'not set'}`);
+
   // Initialize app with configured API key
   initializeApp();
 });
@@ -424,20 +431,26 @@ const fileOperationManager = {
 // Create a desktop SDK upload token
 async function createDesktopSdkUpload() {
   try {
+    console.log("[Main] Requesting upload token from server...");
     const response = await axios.get("http://localhost:13373/start-recording", { timeout: 10000 });
+    
+    console.log('Response:', response.data);
 
     if (response.data.status !== 'success') {
-      console.error("Failed to create upload token:", response.data.message);
+      console.error("[Main] Failed to create upload token:", response.data.message);
       return null;
     } else {
-      console.log("Upload token created successfully:", response.data.upload_token);
+      console.log("[Main] Upload token created successfully");
       return response.data;
     }
   } catch (error) {
-    console.error("Error creating upload token:", error.errors || error.message || error);
+    console.error("[Main] Error creating upload token:", error.errors || error.message || error);
     if (error.response) {
-      console.error("Response data:", error.response.data);
-      console.error("Response status:", error.response.status);
+      console.error("[Main] Response data:", error.response.data);
+      console.error("[Main] Response status:", error.response.status);
+    }
+    if (error.code === 'ECONNREFUSED') {
+      console.error("[Main] Server connection refused. Is the server running on port 13373?");
     }
     return null;
   }
@@ -656,32 +669,22 @@ function setupSDKEventListeners() {
               uploadToken: `${uploadData.upload_token.substring(0, 8)}...` // Log truncated token for security
             });
 
-            RecallAiSdk.uploadRecording({
-              windowId: evt.window.id,
-              uploadToken: uploadData.upload_token
-            });
+            try {
+              await RecallAiSdk.uploadRecording({
+                windowId: evt.window.id,
+                uploadToken: uploadData.upload_token
+              });
+            } catch (uploadError) {
+              console.error('Error uploading recording with token:', uploadError);
+              // Don't attempt fallback - upload requires a token
+            }
           } else {
-            // Fallback to regular upload
-            console.log('Uploading recording without new token');
-
-            // Log the uploadRecording API call (fallback)
-            sdkLogger.logApiCall('uploadRecording', {
-              windowId: evt.window.id
-            });
-
-            RecallAiSdk.uploadRecording({ windowId: evt.window.id });
+            console.log('Cannot upload recording without upload token. Please configure RECALLAI_API_KEY.');
+            // Don't attempt upload without token - it will fail
           }
         } catch (uploadError) {
-          console.error('Error during upload:', uploadError);
-          // Fallback to regular upload
-
-          // Log the uploadRecording API call (error fallback)
-          sdkLogger.logApiCall('uploadRecording', {
-            windowId: evt.window.id,
-            error: 'Fallback after error'
-          });
-
-          RecallAiSdk.uploadRecording({ windowId: evt.window.id });
+          console.error('Error during upload preparation:', uploadError);
+          // Don't attempt upload if we can't get a token
         }
       }, 3000); // Wait 3 seconds before uploading
     } catch (error) {
@@ -827,6 +830,7 @@ ipcMain.handle('save-api-config', async (event, apiKey, apiUrl) => {
 
 // Handle config saved event from config dialog
 ipcMain.on('config-saved', () => {
+  console.log("Config saved, closing config dialog and initializing app");
   if (configWindow) {
     configWindow.close();
   }
@@ -1104,10 +1108,20 @@ ipcMain.handle('startManualRecording', async (event, meetingId) => {
         uploadToken: `${uploadData.upload_token.substring(0, 8)}...` // Log truncated token for security
       });
 
-      RecallAiSdk.startRecording({
-        windowId: key,
-        uploadToken: uploadData.upload_token
-      });
+      try {
+        await RecallAiSdk.startRecording({
+          windowId: key,
+          uploadToken: uploadData.upload_token
+        });
+      } catch (recordingError) {
+        console.error('Error starting manual recording:', recordingError);
+        // Clean up tracking if recording failed to start
+        if (global.activeMeetingIds && global.activeMeetingIds[key]) {
+          delete global.activeMeetingIds[key];
+        }
+        activeRecordings.removeRecording(key);
+        throw recordingError; // Re-throw to be caught by outer try-catch
+      }
 
       return {
         success: true,
@@ -1146,14 +1160,24 @@ ipcMain.handle('stopManualRecording', async (event, recordingId) => {
     // Update our active recordings tracker
     activeRecordings.updateState(recordingId, 'stopping');
 
-    RecallAiSdk.stopRecording({
-      windowId: recordingId
-    });
+    try {
+      await RecallAiSdk.stopRecording({
+        windowId: recordingId
+      });
 
-    // The recording-ended event will be triggered automatically,
-    // which will handle uploading and generating the summary
+      // The recording-ended event will be triggered automatically,
+      // which will handle uploading and generating the summary
 
-    return { success: true };
+      return { success: true };
+    } catch (stopError) {
+      console.error('Error stopping recording:', stopError);
+      // If the meeting doesn't exist, that's okay - it might have already been stopped
+      if (stopError.message && stopError.message.includes('Could not find meeting')) {
+        console.log('Meeting already stopped or not found, continuing cleanup');
+        return { success: true }; // Return success since the goal (stopping) is achieved
+      }
+      return { success: false, error: stopError.message || 'Failed to stop recording' };
+    }
   } catch (error) {
     console.error('Error stopping manual recording:', error);
     return { success: false, error: error.message };
@@ -1384,18 +1408,12 @@ async function createMeetingNoteAndRecord(platformName) {
     try {
       // Get upload token
       const uploadData = await createDesktopSdkUpload();
-
+      console.log('Upload data:', uploadData);
       if (!uploadData || !uploadData.upload_token) {
-        console.error('Failed to get upload token. Recording without upload token.');
-
-        // Log the startRecording API call (no token fallback)
-        sdkLogger.logApiCall('startRecording', {
-          windowId: detectedMeeting.window.id
-        });
-
-        RecallAiSdk.startRecording({
-          windowId: detectedMeeting.window.id
-        });
+        console.error('Failed to get upload token. Cannot start recording without upload token.');
+        console.error('Please configure RECALLAI_API_KEY in the app settings to enable recording.');
+        // Don't attempt to start recording without a token - the SDK requires it
+        return id; // Return the meeting ID even though recording won't start
       } else {
         console.log('Starting recording with upload token:', uploadData.upload_token);
 
@@ -1405,25 +1423,20 @@ async function createMeetingNoteAndRecord(platformName) {
           uploadToken: `${uploadData.upload_token.substring(0, 8)}...` // Log truncated token for security
         });
 
-        RecallAiSdk.startRecording({
-          windowId: detectedMeeting.window.id,
-          uploadToken: uploadData.upload_token
-        });
+        try {
+          await RecallAiSdk.startRecording({
+            windowId: detectedMeeting.window.id,
+            uploadToken: uploadData.upload_token
+          });
+        } catch (recordingError) {
+          console.error('Error starting recording:', recordingError);
+          // Don't throw - just log the error and continue
+        }
       }
     } catch (error) {
       console.error('Error starting recording with upload token:', error);
-
-      // Fallback to recording without token
-
-      // Log the startRecording API call (error fallback)
-      sdkLogger.logApiCall('startRecording', {
-        windowId: detectedMeeting.window.id,
-        error: 'Fallback after error'
-      });
-
-      RecallAiSdk.startRecording({
-        windowId: detectedMeeting.window.id
-      });
+      // Don't attempt fallback - recording requires an upload token
+      console.error('Recording cannot be started without a valid upload token.');
     }
 
     return id;
