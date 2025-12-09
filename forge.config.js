@@ -1,13 +1,16 @@
 const { FusesPlugin } = require('@electron-forge/plugin-fuses');
 const { FuseV1Options, FuseVersion } = require('@electron/fuses');
 
+// Check if we're in CI environment
+const isCI = process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true';
+
 module.exports = {
   packagerConfig: {
     asar: {
       unpackDir: "node_modules/@recallai"
     },
     osxSign: {
-      continueOnError: false,
+      continueOnError: isCI, // Allow builds to continue in CI if signing fails (no certificate available)
       optionsForFile: (_) => {
         // Here, we keep it simple and return a single entitlements.plist file.
         // You can use this callback to map different sets of entitlements
