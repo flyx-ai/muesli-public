@@ -103,16 +103,19 @@ app.get('/start-recording', async (req, res) => {
 
     const requestBody = {
         recording_config: {
-            // transcript: {
-            //     provider: {
-            //         recallai_streaming: {}
-            //     }
-            // },
+            transcript: {
+                provider: {
+                    assembly_ai_v3_streaming: {}
+                }
+            },
             realtime_endpoints: [
                 {
                     type: "desktop_sdk_callback",
                     events: [
+                        "participant_events.join",
+                        "video_separate_png.data",
                         "transcript.data",
+                        "transcript.provider_data"
                     ]
                 },
             ],
