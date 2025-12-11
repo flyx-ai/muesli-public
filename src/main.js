@@ -712,6 +712,21 @@ function initSDK(apiUrl) {
 
     isSDKInitialized = true;
 
+    // Request macOS permissions if on macOS
+    if (process.platform === 'darwin') {
+      console.log('Requesting macOS permissions for Desktop Recording SDK...');
+      try {
+        // Request the minimum required permissions for meeting detection and recording
+        RecallAiSdk.requestPermission("accessibility");
+        RecallAiSdk.requestPermission("microphone");
+        RecallAiSdk.requestPermission("screen-capture");
+        console.log('macOS permissions requested');
+      } catch (permissionError) {
+        console.error('Error requesting macOS permissions:', permissionError);
+        // Continue anyway - permissions might already be granted or user will be prompted
+      }
+    }
+
     // Only register event listeners if SDK initialization succeeded
     setupSDKEventListeners();
   } catch (error) {
@@ -935,7 +950,21 @@ function setupSDKEventListeners() {
   });
 
   RecallAiSdk.addEventListener('permissions-granted', async (evt) => {
-    console.log("PERMISSIONS GRANTED");
+    console.log("macOS permissions granted:", evt);
+    
+    // Log which permissions were granted
+    if (evt && evt.permissions) {
+      console.log("Granted permissions:", evt.permissions);
+    } else {
+      console.log("All required permissions have been granted");
+    }
+    
+    // Optionally notify the user that permissions are ready
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('permissions-granted', {
+        message: 'macOS permissions granted. Meeting detection is now active.'
+      });
+    }
   });
 
   // Track upload progress
