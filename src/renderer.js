@@ -268,6 +268,59 @@ function createMeetingCard(meeting) {
   return card;
 }
 
+// Function to show login view
+function showLoginView() {
+  document.getElementById('loginView').style.display = 'flex';
+  document.getElementById('homeView').style.display = 'none';
+  document.getElementById('editorView').style.display = 'none';
+  // Hide header buttons and search bar when showing login
+  document.getElementById('newNoteBtn').style.display = 'none';
+  document.getElementById('joinMeetingBtn').style.display = 'none';
+  document.getElementById('userAvatar').style.display = 'none';
+  
+  // Hide search container
+  const searchContainer = document.querySelector('.search-container');
+  if (searchContainer) {
+    searchContainer.style.display = 'none';
+  }
+  
+  // Reset login form state
+  const loginErrorMessage = document.getElementById('loginErrorMessage');
+  const loginSuccessMessage = document.getElementById('loginSuccessMessage');
+  const loginViewBtn = document.getElementById('loginViewBtn');
+  
+  if (loginErrorMessage) {
+    loginErrorMessage.classList.remove('show');
+    loginErrorMessage.textContent = '';
+  }
+  if (loginSuccessMessage) {
+    loginSuccessMessage.classList.remove('show');
+    loginSuccessMessage.textContent = '';
+  }
+  if (loginViewBtn) {
+    loginViewBtn.disabled = false;
+    loginViewBtn.textContent = 'Log In';
+  }
+}
+
+// Function to hide login view and show main content
+function hideLoginView() {
+  document.getElementById('loginView').style.display = 'none';
+  // Show header buttons and search bar again
+  document.getElementById('newNoteBtn').style.display = 'block';
+  document.getElementById('joinMeetingBtn').style.display = 'block';
+  document.getElementById('userAvatar').style.display = 'block';
+  
+  // Show search container
+  const searchContainer = document.querySelector('.search-container');
+  if (searchContainer) {
+    searchContainer.style.display = 'block';
+  }
+  
+  // Show home view
+  showHomeView();
+}
+
 // Function to show home view
 function showHomeView() {
   document.getElementById('homeView').style.display = 'block';
@@ -2076,6 +2129,114 @@ document.addEventListener('DOMContentLoaded', async () => {
           document.getElementById('simple-editor').value = meeting.content;
         }
       });
+    }
+  });
+
+  // Handle user avatar click to show/hide menu
+  const userAvatar = document.getElementById('userAvatar');
+  const userMenu = document.getElementById('userMenu');
+  const logoutBtn = document.getElementById('logoutBtn');
+
+  if (userAvatar && userMenu && logoutBtn) {
+    // Toggle menu on avatar click
+    userAvatar.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isVisible = userMenu.style.display !== 'none';
+      userMenu.style.display = isVisible ? 'none' : 'block';
+    });
+
+    // Close menu when clicking outside
+    document.addEventListener('click', (e) => {
+      if (!userAvatar.contains(e.target) && !userMenu.contains(e.target)) {
+        userMenu.style.display = 'none';
+      }
+    });
+
+    // Handle logout button click
+    logoutBtn.addEventListener('click', async () => {
+      console.log('Logout button clicked');
+      try {
+        const result = await window.electronAPI.logout();
+        if (result.success) {
+          console.log('Logout successful');
+          // The login view will be shown automatically via IPC event
+        } else {
+          console.error('Logout failed:', result.error);
+          alert('Logout failed: ' + (result.error || 'Unknown error'));
+        }
+      } catch (error) {
+        console.error('Error during logout:', error);
+        alert('Error during logout: ' + (error.message || error));
+      }
+      // Close the menu
+      userMenu.style.display = 'none';
+    });
+  }
+
+  // Handle login view button
+  const loginViewBtn = document.getElementById('loginViewBtn');
+  const loginErrorMessage = document.getElementById('loginErrorMessage');
+  const loginSuccessMessage = document.getElementById('loginSuccessMessage');
+
+  if (loginViewBtn) {
+    loginViewBtn.addEventListener('click', async () => {
+      loginErrorMessage.classList.remove('show');
+      loginSuccessMessage.classList.remove('show');
+      loginViewBtn.disabled = true;
+      loginViewBtn.textContent = 'Opening Login...';
+      
+      try {
+        const result = await window.electronAPI.openLogin();
+        if (result.success) {
+          loginSuccessMessage.textContent = 'Please complete login in your browser.';
+          loginSuccessMessage.classList.add('show');
+        } else {
+          loginErrorMessage.textContent = result.error || 'Failed to open login page.';
+          loginErrorMessage.classList.add('show');
+          loginViewBtn.disabled = false;
+          loginViewBtn.textContent = 'Log In';
+        }
+      } catch (error) {
+        loginErrorMessage.textContent = 'An error occurred: ' + error.message;
+        loginErrorMessage.classList.add('show');
+        loginViewBtn.disabled = false;
+        loginViewBtn.textContent = 'Log In';
+      }
+    });
+  }
+
+  // Listen for show-login-view event from main process
+  window.electronAPI.onShowLoginView(() => {
+    console.log('Received show-login-view event');
+    showLoginView();
+  });
+
+  // Listen for login success event
+  window.electronAPI.onLoginSuccess(() => {
+    console.log('Received login-success event');
+    loginSuccessMessage.textContent = 'Login successful! Initializing app...';
+    loginSuccessMessage.classList.add('show');
+    loginErrorMessage.classList.remove('show');
+    
+    // Hide login view and show main content after a short delay
+    setTimeout(() => {
+      hideLoginView();
+      // Reload data and reinitialize
+      loadMeetingsDataFromFile().then(() => {
+        renderMeetings();
+      });
+    }, 1000);
+  });
+
+  // Listen for login error event
+  window.electronAPI.onLoginError((message) => {
+    console.log('Received login-error event:', message);
+    loginErrorMessage.textContent = 'Login failed: ' + message;
+    loginErrorMessage.classList.add('show');
+    loginSuccessMessage.classList.remove('show');
+    if (loginViewBtn) {
+      loginViewBtn.disabled = false;
+      loginViewBtn.textContent = 'Log In';
     }
   });
 

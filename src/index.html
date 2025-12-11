@@ -32,15 +32,44 @@
               <path d="M3 18H21V16H3V18ZM3 13H21V11H3V13ZM3 6V8H21V6H3Z" fill="#666666"/>
             </svg>
           </button>
-          <div class="user-avatar">
-            <svg width="32" height="32" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <rect width="40" height="40" rx="20" fill="#f0f0f0"/>
-              <path d="M20 20C22.7614 20 25 17.7614 25 15C25 12.2386 22.7614 10 20 10C17.2386 10 15 12.2386 15 15C15 17.7614 17.2386 20 20 20Z" fill="#a0a0a0"/>
-              <path d="M12 31C12 26.0294 15.5817 22 20 22C24.4183 22 28 26.0294 28 31" stroke="#a0a0a0" stroke-width="4"/>
-            </svg>
+          <div class="user-avatar-container">
+            <div class="user-avatar" id="userAvatar">
+              <svg width="32" height="32" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect width="40" height="40" rx="20" fill="#f0f0f0"/>
+                <path d="M20 20C22.7614 20 25 17.7614 25 15C25 12.2386 22.7614 10 20 10C17.2386 10 15 12.2386 15 15C15 17.7614 17.2386 20 20 20Z" fill="#a0a0a0"/>
+                <path d="M12 31C12 26.0294 15.5817 22 20 22C24.4183 22 28 26.0294 28 31" stroke="#a0a0a0" stroke-width="4"/>
+              </svg>
+            </div>
+            <div class="user-menu" id="userMenu" style="display: none;">
+              <button class="user-menu-item" id="logoutBtn">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin-right: 8px;">
+                  <path d="M17 7L15.59 8.41L18.17 11H8V13H18.17L15.59 15.59L17 17L22 12L17 7ZM4 5H12V3H4C2.9 3 2 3.9 2 5V19C2 20.1 2.9 21 4 21H12V19H4V5Z" fill="currentColor"/>
+                </svg>
+                Logout
+              </button>
+            </div>
           </div>
         </div>
       </header>
+
+      <!-- Login View -->
+      <div id="loginView" style="display: none;">
+        <div class="login-container">
+          <div class="login-content">
+            <div class="login-header">
+              <h1>Welcome to Muesli</h1>
+              <p>Please log in to your ChatSheet account to get started.</p>
+            </div>
+            
+            <div class="error-message" id="loginErrorMessage"></div>
+            <div class="success-message" id="loginSuccessMessage"></div>
+            
+            <div class="button-group">
+              <button type="button" class="btn btn-primary" id="loginViewBtn">Log In</button>
+            </div>
+          </div>
+        </div>
+      </div>
 
       <!-- Home Screen View -->
       <div id="homeView">

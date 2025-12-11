@@ -35,5 +35,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onVideoFrame: (callback) => ipcRenderer.on('video-frame', (_, data) => callback(data)),
   onMeetingDetectionStatus: (callback) => ipcRenderer.on('meeting-detection-status', (_, data) => callback(data)),
   onMeetingTitleUpdated: (callback) => ipcRenderer.on('meeting-title-updated', (_, data) => callback(data)),
-  getActiveRecordingId: (noteId) => ipcRenderer.invoke('getActiveRecordingId', noteId)
+  getActiveRecordingId: (noteId) => ipcRenderer.invoke('getActiveRecordingId', noteId),
+  logout: () => ipcRenderer.invoke('logout'),
+  openLogin: () => ipcRenderer.invoke('open-login'),
+  onShowLoginView: (callback) => ipcRenderer.on('show-login-view', () => callback()),
+  onLoginSuccess: (callback) => ipcRenderer.on('login-success', () => callback()),
+  onLoginError: (callback) => ipcRenderer.on('login-error', (_, message) => callback(message))
 });

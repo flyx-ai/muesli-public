@@ -235,6 +235,11 @@ function handleDeepLink(urlString) {
           configWindow.webContents.send('login-success');
         }
         
+        // Notify main window if login view is shown
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('login-success');
+        }
+        
         // If app is already initialized, we might need to restart or reload
         // For now, just log that login was successful
         console.log('Session token saved successfully');
@@ -243,12 +248,18 @@ function handleDeepLink(urlString) {
         if (configWindow && !configWindow.isDestroyed()) {
           configWindow.webContents.send('login-error', 'No token received from login');
         }
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('login-error', 'No token received from login');
+        }
       }
     }
   } catch (error) {
     console.error('Error handling deep link:', error);
     if (configWindow && !configWindow.isDestroyed()) {
       configWindow.webContents.send('login-error', error.message);
+    }
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('login-error', error.message);
     }
   }
 }
@@ -265,8 +276,15 @@ app.whenReady().then(() => {
   
   // Check if session token is configured
   if (!config.isConfigured()) {
-    console.log("Session token not configured, showing config dialog");
-    createConfigWindow();
+    console.log("Session token not configured, showing login view");
+    // Create main window first, then show login view
+    createWindow();
+    // Send event to show login view in main window after it loads
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.once('did-finish-load', () => {
+        mainWindow.webContents.send('show-login-view');
+      });
+    }
     return; // Don't proceed until config is saved
   }
 
@@ -1049,6 +1067,37 @@ ipcMain.handle('open-login', async (event) => {
   }
 });
 
+// Handle logout
+ipcMain.handle('logout', async (event) => {
+  try {
+    console.log('Logging out user...');
+    
+    // Clear the session token
+    const backendUrl = config.getBackendUrl();
+    config.saveConfig(null, backendUrl);
+    
+    console.log('Session token cleared');
+    
+    // Show the login view in the main window instead of opening a separate dialog
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('show-login-view');
+    } else {
+      // If main window doesn't exist, create config window as fallback
+      if (!configWindow || configWindow.isDestroyed()) {
+        createConfigWindow();
+      } else {
+        configWindow.show();
+        configWindow.focus();
+      }
+    }
+    
+    return { success: true };
+  } catch (error) {
+    console.error('Error during logout:', error);
+    return { success: false, error: error.message };
+  }
+});
+
 // Handle saving API configuration (legacy support - now uses session token)
 ipcMain.handle('save-api-config', async (event, sessionToken, backendUrl) => {
   try {
@@ -1071,6 +1120,10 @@ ipcMain.on('config-saved', () => {
   console.log("Config saved, closing config dialog and initializing app");
   if (configWindow) {
     configWindow.close();
+  }
+  // If main window exists and login view is shown, hide it and initialize
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('login-success');
   }
   // Initialize the app now that config is saved
   initializeApp();
