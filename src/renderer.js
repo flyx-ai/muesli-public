@@ -269,7 +269,7 @@ function createMeetingCard(meeting) {
 }
 
 // Function to show login view
-function showLoginView() {
+async function showLoginView() {
   document.getElementById('loginView').style.display = 'flex';
   document.getElementById('homeView').style.display = 'none';
   document.getElementById('editorView').style.display = 'none';
@@ -300,6 +300,30 @@ function showLoginView() {
   if (loginViewBtn) {
     loginViewBtn.disabled = false;
     loginViewBtn.textContent = 'Log In';
+  }
+  
+  // Load environment configuration
+  if (window.electronAPI && window.electronAPI.getEnvironmentConfig) {
+    try {
+      const result = await window.electronAPI.getEnvironmentConfig();
+      if (result.success) {
+        const environmentSelect = document.getElementById('environmentSelect');
+        const customUrlGroup = document.getElementById('customUrlGroup');
+        const customBackendUrl = document.getElementById('customBackendUrl');
+        
+        if (environmentSelect) {
+          environmentSelect.value = result.environment || 'dev';
+        }
+        if (customBackendUrl && result.customBackendUrl) {
+          customBackendUrl.value = result.customBackendUrl;
+        }
+        if (environmentSelect && customUrlGroup) {
+          customUrlGroup.style.display = environmentSelect.value === 'custom' ? 'block' : 'none';
+        }
+      }
+    } catch (error) {
+      console.error('Error loading environment config:', error);
+    }
   }
 }
 
@@ -2173,13 +2197,85 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  // Handle login view button
+  // Handle login view button and environment selection
   const loginViewBtn = document.getElementById('loginViewBtn');
   const loginErrorMessage = document.getElementById('loginErrorMessage');
   const loginSuccessMessage = document.getElementById('loginSuccessMessage');
+  const environmentSelect = document.getElementById('environmentSelect');
+  const customUrlGroup = document.getElementById('customUrlGroup');
+  const customBackendUrl = document.getElementById('customBackendUrl');
+
+  // Load environment config when login view is shown
+  async function loadEnvironmentConfig() {
+    try {
+      const result = await window.electronAPI.getEnvironmentConfig();
+      if (result.success) {
+        if (environmentSelect) {
+          environmentSelect.value = result.environment || 'dev';
+        }
+        if (customBackendUrl && result.customBackendUrl) {
+          customBackendUrl.value = result.customBackendUrl;
+        }
+        // Show/hide custom URL input based on environment
+        if (environmentSelect && customUrlGroup) {
+          customUrlGroup.style.display = environmentSelect.value === 'custom' ? 'block' : 'none';
+        }
+      }
+    } catch (error) {
+      console.error('Error loading environment config:', error);
+    }
+  }
+
+  // Handle environment selection change
+  if (environmentSelect && customUrlGroup) {
+    environmentSelect.addEventListener('change', () => {
+      customUrlGroup.style.display = environmentSelect.value === 'custom' ? 'block' : 'none';
+    });
+  }
+
+  // Save environment when it changes
+  if (environmentSelect) {
+    environmentSelect.addEventListener('change', async () => {
+      const environment = environmentSelect.value;
+      const customUrl = environment === 'custom' && customBackendUrl ? customBackendUrl.value : null;
+      
+      try {
+        const result = await window.electronAPI.saveEnvironment(environment, customUrl);
+        if (!result.success) {
+          console.error('Failed to save environment:', result.error);
+        }
+      } catch (error) {
+        console.error('Error saving environment:', error);
+      }
+    });
+  }
+
+  // Save custom URL when it changes
+  if (customBackendUrl) {
+    customBackendUrl.addEventListener('blur', async () => {
+      if (environmentSelect && environmentSelect.value === 'custom') {
+        const customUrl = customBackendUrl.value.trim();
+        try {
+          const result = await window.electronAPI.saveEnvironment('custom', customUrl || null);
+          if (!result.success) {
+            console.error('Failed to save custom URL:', result.error);
+          }
+        } catch (error) {
+          console.error('Error saving custom URL:', error);
+        }
+      }
+    });
+  }
 
   if (loginViewBtn) {
     loginViewBtn.addEventListener('click', async () => {
+      // Save environment before opening login
+      if (environmentSelect) {
+        const environment = environmentSelect.value;
+        const customUrl = environment === 'custom' && customBackendUrl ? customBackendUrl.value.trim() : null;
+        await window.electronAPI.saveEnvironment(environment, customUrl);
+      }
+      
       loginErrorMessage.classList.remove('show');
       loginSuccessMessage.classList.remove('show');
       loginViewBtn.disabled = true;
@@ -2206,9 +2302,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // Listen for show-login-view event from main process
-  window.electronAPI.onShowLoginView(() => {
+  window.electronAPI.onShowLoginView(async () => {
     console.log('Received show-login-view event');
-    showLoginView();
+    await showLoginView();
   });
 
   // Listen for login success event

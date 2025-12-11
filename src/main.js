@@ -226,9 +226,9 @@ function handleDeepLink(urlString) {
       const token = urlObj.searchParams.get('token');
       if (token) {
         console.log('Received session token from deep link');
-        // Save the session token
-        const backendUrl = config.getBackendUrl();
-        config.saveConfig(token, backendUrl);
+        // Save the session token (preserve current environment)
+        const currentConfig = config.loadConfig();
+        config.saveConfig(token, currentConfig.environment, currentConfig.customBackendUrl);
         
         // Notify config window if it's open
         if (configWindow && !configWindow.isDestroyed()) {
@@ -1072,9 +1072,9 @@ ipcMain.handle('logout', async (event) => {
   try {
     console.log('Logging out user...');
     
-    // Clear the session token
-    const backendUrl = config.getBackendUrl();
-    config.saveConfig(null, backendUrl);
+    // Clear the session token (preserve current environment)
+    const currentConfig = config.loadConfig();
+    config.saveConfig(null, currentConfig.environment, currentConfig.customBackendUrl);
     
     console.log('Session token cleared');
     
@@ -1101,8 +1101,25 @@ ipcMain.handle('logout', async (event) => {
 // Handle saving API configuration (legacy support - now uses session token)
 ipcMain.handle('save-api-config', async (event, sessionToken, backendUrl) => {
   try {
-    const backendUrlToUse = backendUrl || config.getBackendUrl();
-    const success = config.saveConfig(sessionToken, backendUrlToUse);
+    const currentConfig = config.loadConfig();
+    // If backendUrl is provided and different, try to match it to an environment or set as custom
+    let environment = currentConfig.environment;
+    let customBackendUrl = currentConfig.customBackendUrl;
+    
+    if (backendUrl) {
+      const foundEnv = Object.keys(config.ENVIRONMENTS).find(env => 
+        config.ENVIRONMENTS[env].backendUrl === backendUrl
+      );
+      if (foundEnv) {
+        environment = foundEnv;
+        customBackendUrl = null;
+      } else {
+        environment = 'custom';
+        customBackendUrl = backendUrl;
+      }
+    }
+    
+    const success = config.saveConfig(sessionToken, environment, customBackendUrl);
     if (success) {
       console.log('Configuration saved successfully');
       return { success: true };
@@ -1111,6 +1128,39 @@ ipcMain.handle('save-api-config', async (event, sessionToken, backendUrl) => {
     }
   } catch (error) {
     console.error('Error saving config:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Handle saving environment configuration
+ipcMain.handle('save-environment', async (event, environment, customBackendUrl) => {
+  try {
+    const success = config.saveEnvironment(environment, customBackendUrl);
+    if (success) {
+      console.log('Environment configuration saved successfully');
+      return { success: true };
+    } else {
+      return { success: false, error: 'Failed to save environment configuration' };
+    }
+  } catch (error) {
+    console.error('Error saving environment config:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Handle getting current environment configuration
+ipcMain.handle('get-environment-config', async () => {
+  try {
+    const currentConfig = config.loadConfig();
+    return {
+      success: true,
+      environment: currentConfig.environment || config.DEFAULT_ENVIRONMENT,
+      customBackendUrl: currentConfig.customBackendUrl || null,
+      backendUrl: config.getBackendUrl(), // Computed, not stored
+      environments: config.ENVIRONMENTS
+    };
+  } catch (error) {
+    console.error('Error getting environment config:', error);
     return { success: false, error: error.message };
   }
 });

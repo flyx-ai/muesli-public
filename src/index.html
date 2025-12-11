@@ -61,6 +61,21 @@
               <p>Please log in to your ChatSheet account to get started.</p>
             </div>
             
+            <div class="form-group">
+              <label for="environmentSelect">Environment</label>
+              <select id="environmentSelect" class="form-select">
+                <option value="prod">Production</option>
+                <option value="staging">Staging</option>
+                <option value="dev">Development</option>
+                <option value="custom">Custom</option>
+              </select>
+            </div>
+            
+            <div class="form-group" id="customUrlGroup" style="display: none;">
+              <label for="customBackendUrl">Custom Backend URL</label>
+              <input type="text" id="customBackendUrl" class="form-input" placeholder="https://api.example.com">
+            </div>
+            
             <div class="error-message" id="loginErrorMessage"></div>
             <div class="success-message" id="loginSuccessMessage"></div>
             

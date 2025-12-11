@@ -33,6 +33,38 @@ const getConfigPath = () => {
   return path.join(userDataPath, 'config.json');
 };
 
+// Environment definitions (must match config.js)
+const ENVIRONMENTS = {
+  prod: {
+    name: 'Production',
+    backendUrl: 'https://api.chatsheet.com'
+  },
+  staging: {
+    name: 'Staging',
+    backendUrl: 'https://staging.api.chatsheet.com'
+  },
+  dev: {
+    name: 'Development',
+    backendUrl: 'https://run.dev.tryecho.ai/'
+  },
+  custom: {
+    name: 'Custom',
+    backendUrl: null
+  }
+};
+
+const DEFAULT_ENVIRONMENT = 'dev';
+const DEFAULT_URL = ENVIRONMENTS[DEFAULT_ENVIRONMENT].backendUrl;
+
+// Get backend URL for a specific environment
+const getBackendUrlForEnvironment = (environment, customBackendUrl = null) => {
+  if (environment === 'custom') {
+    return customBackendUrl || DEFAULT_URL;
+  }
+  const env = ENVIRONMENTS[environment];
+  return env ? env.backendUrl : DEFAULT_URL;
+};
+
 // Load configuration from file
 const loadConfig = () => {
   try {
@@ -51,9 +83,29 @@ const loadConfig = () => {
       if (hasSessionToken) {
         console.log(`[Server] Session Token (first 8 chars): ${sessionToken.substring(0, 8)}...`);
       }
+      
+      // Handle migration from old config format (without environment)
+      let environment = config.environment || DEFAULT_ENVIRONMENT;
+      let customBackendUrl = config.customBackendUrl || null;
+      
+      // If old format has backendUrl but no environment, try to match it
+      if (config.backendUrl && !config.environment) {
+        const foundEnv = Object.keys(ENVIRONMENTS).find(env => 
+          ENVIRONMENTS[env].backendUrl === config.backendUrl
+        );
+        if (foundEnv) {
+          environment = foundEnv;
+        } else {
+          // If it doesn't match any environment, set as custom
+          environment = 'custom';
+          customBackendUrl = config.backendUrl;
+        }
+      }
+      
       return {
-        sessionToken: config.sessionToken || null,
-        backendUrl: config.backendUrl || 'https://api.chatsheet.com'
+        sessionToken: sessionToken,
+        environment: environment,
+        customBackendUrl: customBackendUrl
       };
     } else {
       console.error(`[Server] Config file not found at: ${configPath}`);
@@ -71,20 +123,21 @@ const loadConfig = () => {
   }
   return {
     sessionToken: null,
-    backendUrl: 'https://api.chatsheet.com'
+    environment: DEFAULT_ENVIRONMENT,
+    customBackendUrl: null
   };
 };
 
 // API configuration
 let config = loadConfig();
 let SESSION_TOKEN = config.sessionToken;
-let BACKEND_URL = config.backendUrl || 'https://api.chatsheet.com';
+let BACKEND_URL = getBackendUrlForEnvironment(config.environment || DEFAULT_ENVIRONMENT, config.customBackendUrl);
 
 // Function to reload config (useful if config changes)
 const reloadConfig = () => {
   config = loadConfig();
   SESSION_TOKEN = config.sessionToken;
-  BACKEND_URL = config.backendUrl || 'https://api.chatsheet.com';
+  BACKEND_URL = getBackendUrlForEnvironment(config.environment || DEFAULT_ENVIRONMENT, config.customBackendUrl);
 };
 
 app.post('/start-recording', async (req, res) => {

@@ -40,5 +40,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openLogin: () => ipcRenderer.invoke('open-login'),
   onShowLoginView: (callback) => ipcRenderer.on('show-login-view', () => callback()),
   onLoginSuccess: (callback) => ipcRenderer.on('login-success', () => callback()),
-  onLoginError: (callback) => ipcRenderer.on('login-error', (_, message) => callback(message))
+  onLoginError: (callback) => ipcRenderer.on('login-error', (_, message) => callback(message)),
+  getEnvironmentConfig: () => ipcRenderer.invoke('get-environment-config'),
+  saveEnvironment: (environment, customBackendUrl) => ipcRenderer.invoke('save-environment', environment, customBackendUrl)
 });
