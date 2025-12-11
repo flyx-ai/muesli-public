@@ -1382,45 +1382,64 @@ document.addEventListener('DOMContentLoaded', async () => {
     console.log('Transcript updated for meeting:', meetingId);
 
     // If this note is currently being edited, we can refresh the data
-    // and update the debug panel's transcript section
+    // and update the debug panel's transcript section AND the editor
     if (currentEditingMeetingId === meetingId) {
       loadMeetingsDataFromFile().then(() => {
         const meeting = [...upcomingMeetings, ...pastMeetings].find(m => m.id === meetingId);
-        if (meeting && meeting.transcript && meeting.transcript.length > 0) {
-          // Log the latest transcript entry
-          const latestEntry = meeting.transcript[meeting.transcript.length - 1];
-          console.log(`Latest transcript: ${latestEntry.speaker}: "${latestEntry.text}"`);
+        if (meeting) {
+          // Update the editor content if it has been updated
+          const editorElement = document.getElementById('simple-editor');
+          if (editorElement && meeting.content) {
+            // Only update if content has changed to avoid overwriting user edits
+            // Check if the current editor content is different from the meeting content
+            const currentEditorContent = editorElement.value;
+            if (currentEditorContent !== meeting.content) {
+              // Update the editor with the new content (which includes transcript)
+              requestAnimationFrame(() => {
+                editorElement.value = meeting.content;
+                // Scroll to bottom to show latest transcript
+                editorElement.scrollTop = editorElement.scrollHeight;
+                console.log('Updated editor content with transcript for meeting:', meetingId);
+              });
+            }
+          }
 
-          // Update the transcript area in the debug panel
-          updateDebugTranscript(meeting.transcript);
+          if (meeting.transcript && meeting.transcript.length > 0) {
+            // Log the latest transcript entry
+            const latestEntry = meeting.transcript[meeting.transcript.length - 1];
+            console.log(`Latest transcript: ${latestEntry.speaker}: "${latestEntry.text}"`);
 
-          // Show notification about new transcript if debug panel is closed
-          const debugPanel = document.getElementById('debugPanel');
-          if (debugPanel && debugPanel.classList.contains('hidden')) {
-            const debugPanelToggle = document.getElementById('debugPanelToggle');
-            if (debugPanelToggle) {
-              // Add pulse effect to show there's new content
-              debugPanelToggle.classList.add('has-new-content');
+            // Update the transcript area in the debug panel
+            updateDebugTranscript(meeting.transcript);
 
-              // Create a mini notification if we're recording
-              if (window.isRecording) {
-                const miniNotification = document.createElement('div');
-                miniNotification.className = 'debug-notification transcript-notification';
-                miniNotification.innerHTML = `
-                  <span class="debug-notification-speaker">${latestEntry.speaker || 'Unknown'}</span>:
-                  <span class="debug-notification-text">${latestEntry.text.slice(0, 40)}${latestEntry.text.length > 40 ? '...' : ''}</span>
-                `;
+            // Show notification about new transcript if debug panel is closed
+            const debugPanel = document.getElementById('debugPanel');
+            if (debugPanel && debugPanel.classList.contains('hidden')) {
+              const debugPanelToggle = document.getElementById('debugPanelToggle');
+              if (debugPanelToggle) {
+                // Add pulse effect to show there's new content
+                debugPanelToggle.classList.add('has-new-content');
 
-                // Add to document
-                document.body.appendChild(miniNotification);
+                // Create a mini notification if we're recording
+                if (window.isRecording) {
+                  const miniNotification = document.createElement('div');
+                  miniNotification.className = 'debug-notification transcript-notification';
+                  miniNotification.innerHTML = `
+                    <span class="debug-notification-speaker">${latestEntry.speaker || 'Unknown'}</span>:
+                    <span class="debug-notification-text">${latestEntry.text.slice(0, 40)}${latestEntry.text.length > 40 ? '...' : ''}</span>
+                  `;
 
-                // Remove after a short time
-                setTimeout(() => {
-                  miniNotification.classList.add('fade-out');
+                  // Add to document
+                  document.body.appendChild(miniNotification);
+
+                  // Remove after a short time
                   setTimeout(() => {
-                    document.body.removeChild(miniNotification);
-                  }, 500);
-                }, 5000);
+                    miniNotification.classList.add('fade-out');
+                    setTimeout(() => {
+                      document.body.removeChild(miniNotification);
+                    }, 500);
+                  }, 5000);
+                }
               }
             }
           }
@@ -1485,6 +1504,44 @@ document.addEventListener('DOMContentLoaded', async () => {
         // This creates a better experience of watching text appear
         editorElement.scrollTop = editorElement.scrollHeight;
       });
+    }
+  });
+
+  // Listen for content updates (e.g., when transcript is added)
+  window.electronAPI.onContentUpdated((data) => {
+    const { meetingId, content } = data;
+    console.log('Content updated event received for meeting:', meetingId, 'Current editing:', currentEditingMeetingId);
+
+    // If this note is currently being edited, update the content immediately
+    if (currentEditingMeetingId === meetingId) {
+      // Get the editor element
+      const editorElement = document.getElementById('simple-editor');
+
+      if (!editorElement) {
+        console.error('Editor element not found when trying to update content');
+        return;
+      }
+
+      if (!content) {
+        console.warn('Content update received but content is empty');
+        return;
+      }
+
+      console.log('Updating editor content, length:', content.length);
+
+      // Update the editor with the latest content
+      // Use requestAnimationFrame for smoother updates that don't block the main thread
+      requestAnimationFrame(() => {
+        editorElement.value = content;
+
+        // Force the editor to scroll to the bottom to follow the new text
+        // This creates a better experience of watching text appear
+        editorElement.scrollTop = editorElement.scrollHeight;
+        
+        console.log('Editor content updated successfully');
+      });
+    } else {
+      console.log('Content update ignored - meeting ID mismatch. Expected:', currentEditingMeetingId, 'Got:', meetingId);
     }
   });
 

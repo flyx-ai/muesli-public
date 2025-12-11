@@ -2,8 +2,11 @@ const fs = require('fs');
 const path = require('path');
 const { app } = require('electron');
 
-// Default API URL
+// Default API URL (Recall.ai)
 const DEFAULT_API_URL = 'https://us-west-2.recall.ai';
+// Default backend URL (for authentication and SDK upload proxy)
+// const DEFAULT_URL = 'https://advantages-str-screensavers-adjustments.trycloudflare.com';
+const DEFAULT_URL = 'https://run.dev.tryecho.ai/';
 
 // Path to config file in user data directory
 const getConfigPath = () => {
@@ -18,26 +21,26 @@ const loadConfig = () => {
       const configData = fs.readFileSync(configPath, 'utf8');
       const config = JSON.parse(configData);
       return {
-        apiKey: config.apiKey || null,
-        apiUrl: config.apiUrl || DEFAULT_API_URL
+        sessionToken: config.sessionToken || null,
+        backendUrl: config.backendUrl || DEFAULT_URL
       };
     }
   } catch (error) {
     console.error('Error loading config:', error);
   }
   return {
-    apiKey: null,
-    apiUrl: DEFAULT_API_URL
+    sessionToken: null,
+    backendUrl: DEFAULT_URL
   };
 };
 
 // Save configuration to file
-const saveConfig = (apiKey, apiUrl = DEFAULT_API_URL) => {
+const saveConfig = (sessionToken, backendUrl = DEFAULT_URL) => {
   try {
     const configPath = getConfigPath();
     const config = {
-      apiKey: apiKey,
-      apiUrl: apiUrl || DEFAULT_API_URL
+      sessionToken: sessionToken,
+      backendUrl: backendUrl || DEFAULT_URL
     };
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
     return true;
@@ -47,30 +50,31 @@ const saveConfig = (apiKey, apiUrl = DEFAULT_API_URL) => {
   }
 };
 
-// Check if API key is configured
+// Check if session token is configured
 const isConfigured = () => {
   const config = loadConfig();
-  return config.apiKey !== null && config.apiKey.trim() !== '';
+  return config.sessionToken !== null && config.sessionToken.trim() !== '';
 };
 
-// Get API key
-const getApiKey = () => {
+// Get session token
+const getSessionToken = () => {
   const config = loadConfig();
-  return config.apiKey;
+  return config.sessionToken;
 };
 
-// Get API URL
-const getApiUrl = () => {
+// Get backend URL (for authentication and SDK upload proxy)
+const getBackendUrl = () => {
   const config = loadConfig();
-  return config.apiUrl || DEFAULT_API_URL;
+  return config.backendUrl || DEFAULT_URL;
 };
 
 module.exports = {
   loadConfig,
   saveConfig,
   isConfigured,
-  getApiKey,
-  getApiUrl,
-  DEFAULT_API_URL
+  getSessionToken,
+  getBackendUrl,
+  DEFAULT_API_URL,
+  DEFAULT_URL
 };
 

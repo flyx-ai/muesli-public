@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Configure API Key</title>
+  <title>Login</title>
   <style>
     * {
       margin: 0;
@@ -151,51 +151,33 @@
   <div class="config-container">
     <div class="config-header">
       <h1>Welcome to Muesli</h1>
-      <p>Please enter your Recall.ai API key to get started. You can find your API key in your Recall.ai dashboard.</p>
+      <p>Please log in to get started. You'll be redirected to the login page in your browser.</p>
     </div>
     
     <div class="error-message" id="errorMessage"></div>
     <div class="success-message" id="successMessage"></div>
     
-    <form id="configForm">
+    <div id="loginContainer">
       <div class="form-group">
-        <label for="apiKey">API Key *</label>
-        <input 
-          type="password" 
-          id="apiKey" 
-          name="apiKey" 
-          placeholder="Enter your Recall.ai API key"
-          required
-          autocomplete="off"
-        />
-        <div class="help-text">Your API key will be stored securely on your device.</div>
-      </div>
-      
-      <div class="form-group">
-        <label for="apiUrl">API URL</label>
-        <input 
-          type="text" 
-          id="apiUrl" 
-          name="apiUrl" 
-          placeholder="https://us-west-2.recall.ai"
-          value="https://us-west-2.recall.ai"
-        />
-        <div class="help-text">Default: https://us-west-2.recall.ai</div>
+        <p style="margin-bottom: 20px; color: #666;">Click the button below to open the login page in your browser. After logging in, you'll be automatically redirected back to the app.</p>
       </div>
       
       <div class="button-group">
-        <button type="submit" class="btn btn-primary" id="saveBtn">Save & Continue</button>
+        <button type="button" class="btn btn-primary" id="loginBtn">Log In</button>
       </div>
-    </form>
+      
+      <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;">
+        <p style="font-size: 12px; color: #999; text-align: center;">
+          Waiting for login...
+        </p>
+      </div>
+    </div>
   </div>
   
   <script>
     const { ipcRenderer } = require('electron');
     
-    const form = document.getElementById('configForm');
-    const apiKeyInput = document.getElementById('apiKey');
-    const apiUrlInput = document.getElementById('apiUrl');
-    const saveBtn = document.getElementById('saveBtn');
+    const loginBtn = document.getElementById('loginBtn');
     const errorMessage = document.getElementById('errorMessage');
     const successMessage = document.getElementById('successMessage');
     
@@ -216,54 +198,35 @@
       successMessage.classList.remove('show');
     }
     
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
+    loginBtn.addEventListener('click', async () => {
       hideMessages();
-      
-      const apiKey = apiKeyInput.value.trim();
-      const apiUrl = apiUrlInput.value.trim() || 'https://us-west-2.recall.ai';
-      
-      if (!apiKey) {
-        showError('Please enter your API key');
-        return;
-      }
-      
-      // Validate URL format
-      try {
-        new URL(apiUrl);
-      } catch (err) {
-        showError('Please enter a valid API URL');
-        return;
-      }
-      
-      saveBtn.disabled = true;
-      saveBtn.textContent = 'Saving...';
+      loginBtn.disabled = true;
+      loginBtn.textContent = 'Opening login page...';
       
       try {
-        // Send config to main process
-        const result = await ipcRenderer.invoke('save-api-config', apiKey, apiUrl);
-        
-        if (result.success) {
-          showSuccess('Configuration saved successfully!');
-          setTimeout(() => {
-            // Close the config window
-            ipcRenderer.send('config-saved');
-          }, 500);
-        } else {
-          showError(result.error || 'Failed to save configuration');
-          saveBtn.disabled = false;
-          saveBtn.textContent = 'Save & Continue';
-        }
+        // Request main process to open login URL
+        await ipcRenderer.invoke('open-login');
+        showSuccess('Login page opened in your browser. Please complete the login there.');
       } catch (error) {
-        showError('An error occurred: ' + error.message);
-        saveBtn.disabled = false;
-        saveBtn.textContent = 'Save & Continue';
+        showError('Failed to open login page: ' + error.message);
+        loginBtn.disabled = false;
+        loginBtn.textContent = 'Log In';
       }
     });
     
-    // Focus on API key input when window loads
-    window.addEventListener('load', () => {
-      apiKeyInput.focus();
+    // Listen for login success from main process
+    ipcRenderer.on('login-success', () => {
+      showSuccess('Login successful! Closing window...');
+      setTimeout(() => {
+        ipcRenderer.send('config-saved');
+      }, 1000);
+    });
+    
+    // Listen for login error from main process
+    ipcRenderer.on('login-error', (event, error) => {
+      showError(error || 'Login failed. Please try again.');
+      loginBtn.disabled = false;
+      loginBtn.textContent = 'Log In';
     });
   </script>
 </body>

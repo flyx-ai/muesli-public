@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, protocol, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, protocol, Notification, shell, dialog } = require('electron');
 const path = require('node:path');
 const url = require('url');
 const fs = require('fs');
@@ -18,9 +18,11 @@ function getHeaderLines() {
 
 // Initialize OpenAI client with OpenRouter as the base URL
 // Note: OpenRouter key is optional, so we'll initialize it even if not set
+// Check for API key in environment variable (OPENAI_API_KEY or OPENROUTER_API_KEY)
+const apiKey = process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY || null;
 let openai = new OpenAI({
   baseURL: "https://openrouter.ai/api/v1",
-  apiKey: null, // Will be set from config if available
+  apiKey: apiKey, // Will be set from environment variable if available
   defaultHeaders: {
     "HTTP-Referer": "https://recall.ai",
     "X-Title": "Muesli AI Notetaker"
@@ -129,23 +131,19 @@ const createConfigWindow = () => {
     configWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(`
       <!DOCTYPE html>
       <html>
-      <head><meta charset="UTF-8"><title>Configure API Key</title></head>
+      <head><meta charset="UTF-8"><title>Login</title></head>
       <body style="font-family: sans-serif; padding: 40px;">
-        <h1>Configure API Key</h1>
-        <p>Please enter your Recall.ai API key:</p>
-        <input type="password" id="apiKey" placeholder="API Key" style="width: 100%; padding: 10px; margin: 10px 0;">
-        <input type="text" id="apiUrl" placeholder="API URL" value="https://us-west-2.recall.ai" style="width: 100%; padding: 10px; margin: 10px 0;">
-        <button onclick="saveConfig()" style="padding: 10px 20px; background: #6947BD; color: white; border: none; cursor: pointer;">Save</button>
+        <h1>Welcome to Muesli</h1>
+        <p>Please log in to get started.</p>
+        <button onclick="openLogin()" style="padding: 10px 20px; background: #6947BD; color: white; border: none; cursor: pointer;">Log In</button>
         <script>
           const { ipcRenderer } = require('electron');
-          async function saveConfig() {
-            const apiKey = document.getElementById('apiKey').value;
-            const apiUrl = document.getElementById('apiUrl').value || 'https://us-west-2.recall.ai';
-            if (apiKey) {
-              await ipcRenderer.invoke('save-api-config', apiKey, apiUrl);
-              ipcRenderer.send('config-saved');
-            }
+          async function openLogin() {
+            await ipcRenderer.invoke('open-login');
           }
+          ipcRenderer.on('login-success', () => {
+            ipcRenderer.send('config-saved');
+          });
         </script>
       </body>
       </html>
@@ -163,25 +161,123 @@ const createConfigWindow = () => {
   return configWindow;
 };
 
+// Request single instance lock FIRST (before protocol registration)
+// This ensures only one instance of the app runs at a time
+// When a second instance tries to launch, it will trigger 'second-instance' event
+const gotTheLock = app.requestSingleInstanceLock();
+
+if (!gotTheLock) {
+  // Another instance is already running, quit this one
+  app.quit();
+  process.exit(0);
+}
+
+// Register deep link protocol handler
+// This must be called before app.whenReady() on Windows
+if (process.defaultApp) {
+  // Development mode - register with full path
+  if (process.argv.length >= 2) {
+    app.setAsDefaultProtocolClient('chatsheet-recall', process.execPath, [path.resolve(process.argv[1])]);
+  }
+} else {
+  // Production mode
+  app.setAsDefaultProtocolClient('chatsheet-recall');
+}
+
+// Handle deep link when app is already running (macOS)
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  handleDeepLink(url);
+});
+
+// Handle second instance (when app is already running and receives a deep link)
+app.on('second-instance', (event, commandLine, workingDirectory) => {
+  // Find the protocol URL in command line arguments
+  const protocolUrl = commandLine.find(arg => arg && arg.startsWith('chatsheet-recall://'));
+  if (protocolUrl) {
+    handleDeepLink(protocolUrl);
+  }
+  
+  // Focus the existing window
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  }
+});
+
+// Handle deep link when app is launched via protocol (Windows/Linux)
+// Check command line arguments for protocol URL (only on first launch)
+if (process.platform === 'win32' || process.platform === 'linux') {
+  const protocolUrl = process.argv.find(arg => arg && arg.startsWith('chatsheet-recall://'));
+  if (protocolUrl) {
+    // Store it to handle after app is ready
+    // We'll handle it in app.whenReady() to ensure config is loaded
+    process.deepLinkUrl = protocolUrl;
+  }
+}
+
+// Function to handle deep link callbacks
+function handleDeepLink(urlString) {
+  try {
+    console.log('Received deep link:', urlString);
+    const urlObj = new URL(urlString);
+    
+    if (urlObj.protocol === 'chatsheet-recall:' && urlObj.hostname === 'login') {
+      const token = urlObj.searchParams.get('token');
+      if (token) {
+        console.log('Received session token from deep link');
+        // Save the session token
+        const backendUrl = config.getBackendUrl();
+        config.saveConfig(token, backendUrl);
+        
+        // Notify config window if it's open
+        if (configWindow && !configWindow.isDestroyed()) {
+          configWindow.webContents.send('login-success');
+        }
+        
+        // If app is already initialized, we might need to restart or reload
+        // For now, just log that login was successful
+        console.log('Session token saved successfully');
+      } else {
+        console.error('No token found in deep link');
+        if (configWindow && !configWindow.isDestroyed()) {
+          configWindow.webContents.send('login-error', 'No token received from login');
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Error handling deep link:', error);
+    if (configWindow && !configWindow.isDestroyed()) {
+      configWindow.webContents.send('login-error', error.message);
+    }
+  }
+}
+
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(() => {
-  // Check if API key is configured
+  // Handle deep link if app was launched via protocol (Windows/Linux)
+  if (process.deepLinkUrl) {
+    handleDeepLink(process.deepLinkUrl);
+    delete process.deepLinkUrl;
+  }
+  
+  // Check if session token is configured
   if (!config.isConfigured()) {
-    console.log("API key not configured, showing config dialog");
+    console.log("Session token not configured, showing config dialog");
     createConfigWindow();
     return; // Don't proceed until config is saved
   }
 
-  // API key is already configured
-  const apiKey = config.getApiKey();
-  const apiUrl = config.getApiUrl();
-  console.log("API key already configured");
+  // Session token is already configured
+  const sessionToken = config.getSessionToken();
+  const apiUrl = config.DEFAULT_API_URL; // Use default API URL directly
+  console.log("Session token already configured");
   console.log(`Using API URL: ${apiUrl}`);
-  console.log(`API Key: ${apiKey ? apiKey.substring(0, 8) + '...' : 'not set'}`);
+  console.log(`Session Token: ${sessionToken ? sessionToken.substring(0, 8) + '...' : 'not set'}`);
 
-  // Initialize app with configured API key
+  // Initialize app with configured session token
   initializeApp();
 });
 
@@ -191,9 +287,9 @@ function initializeApp() {
   // Log all registered IPC handlers
   console.log("IPC handlers:", Object.keys(ipcMain._invokeHandlers));
   
-  // Load API configuration
-  const apiKey = config.getApiKey();
-  const apiUrl = config.getApiUrl();
+  // Load configuration
+  const sessionToken = config.getSessionToken();
+  const apiUrl = config.DEFAULT_API_URL; // Use default API URL directly
   console.log(`Using API URL: ${apiUrl}`);
 
   // Set up SDK logger IPC handlers
@@ -429,15 +525,67 @@ const fileOperationManager = {
 };
 
 // Create a desktop SDK upload token
-async function createDesktopSdkUpload() {
+// meetingUrl: The meeting URL (e.g., "https://meet.google.com/kpy-twki-tuo")
+async function createDesktopSdkUpload(meetingUrl) {
   try {
-    console.log("[Main] Requesting upload token from server...");
-    const response = await axios.get("http://localhost:13373/start-recording", { timeout: 10000 });
+    console.log("[Main] Requesting upload token from server for meeting:", meetingUrl);
+    
+    if (!meetingUrl) {
+      console.warn("[Main] No meeting URL provided, using empty string");
+      meetingUrl = '';
+    }
+    
+    const response = await axios.post("http://localhost:13373/start-recording", 
+      { meeting_url: meetingUrl }, 
+      { timeout: 10000 }
+    );
     
     console.log('Response:', response.data);
 
-    if (response.data.status !== 'success') {
-      console.error("[Main] Failed to create upload token:", response.data.message);
+    // Check if we have an upload_token (success) or an error status
+    // The backend returns status as an object with code, or a string 'error'
+    if (response.data.status === 'error' || !response.data.upload_token) {
+      const errorMessage = response.data.message || 'Failed to create upload token';
+      console.error("[Main] Failed to create upload token:", errorMessage);
+      
+      // Show error notification to user
+      try {
+        let notification = new Notification({
+          title: 'Recording Error',
+          body: `Failed to start recording: ${errorMessage}`,
+          urgency: 'critical' // Make it more prominent
+        });
+        notification.show();
+        console.log("[Main] Error notification shown to user");
+        
+        // Also show a dialog to ensure user sees it
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          dialog.showMessageBox(mainWindow, {
+            type: 'error',
+            title: 'Recording Error',
+            message: 'Failed to start recording',
+            detail: errorMessage,
+            buttons: ['OK']
+          }).catch(err => {
+            console.error("[Main] Failed to show error dialog:", err);
+          });
+        }
+      } catch (notifError) {
+        console.error("[Main] Failed to show error notification:", notifError);
+        // Fallback: show dialog if notification fails
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          dialog.showMessageBox(mainWindow, {
+            type: 'error',
+            title: 'Recording Error',
+            message: 'Failed to start recording',
+            detail: errorMessage,
+            buttons: ['OK']
+          }).catch(err => {
+            console.error("[Main] Failed to show error dialog:", err);
+          });
+        }
+      }
+      
       return null;
     } else {
       console.log("[Main] Upload token created successfully");
@@ -445,13 +593,68 @@ async function createDesktopSdkUpload() {
     }
   } catch (error) {
     console.error("[Main] Error creating upload token:", error.errors || error.message || error);
+    
+    // Extract user-friendly error message
+    let errorMessage = 'Failed to create upload token';
     if (error.response) {
       console.error("[Main] Response data:", error.response.data);
       console.error("[Main] Response status:", error.response.status);
-    }
-    if (error.code === 'ECONNREFUSED') {
+      
+      // Try to extract error message from response
+      if (error.response.data && error.response.data.message) {
+        errorMessage = error.response.data.message;
+      } else if (error.response.status === 500) {
+        errorMessage = 'Server error: Please try again or contact support';
+      } else if (error.response.status === 401 || error.response.status === 403) {
+        errorMessage = 'Authentication failed: Please log in again';
+      } else {
+        errorMessage = `Request failed with status code ${error.response.status}`;
+      }
+    } else if (error.code === 'ECONNREFUSED') {
       console.error("[Main] Server connection refused. Is the server running on port 13373?");
+      errorMessage = 'Cannot connect to server. Please ensure the app is running properly.';
+    } else if (error.message) {
+      errorMessage = error.message;
     }
+    
+    // Show error notification to user
+    try {
+      let notification = new Notification({
+        title: 'Recording Error',
+        body: errorMessage,
+        urgency: 'critical' // Make it more prominent
+      });
+      notification.show();
+      console.log("[Main] Error notification shown to user (from catch block)");
+      
+      // Also show a dialog to ensure user sees it
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        dialog.showMessageBox(mainWindow, {
+          type: 'error',
+          title: 'Recording Error',
+          message: 'Failed to create upload token',
+          detail: errorMessage,
+          buttons: ['OK']
+        }).catch(err => {
+          console.error("[Main] Failed to show error dialog:", err);
+        });
+      }
+    } catch (notifError) {
+      console.error("[Main] Failed to show error notification:", notifError);
+      // Fallback: show dialog if notification fails
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        dialog.showMessageBox(mainWindow, {
+          type: 'error',
+          title: 'Recording Error',
+          message: 'Failed to create upload token',
+          detail: errorMessage,
+          buttons: ['OK']
+        }).catch(err => {
+          console.error("[Main] Failed to show error dialog:", err);
+        });
+      }
+    }
+    
     return null;
   }
 }
@@ -565,16 +768,26 @@ function setupSDKEventListeners() {
 
     // Update the detectedMeeting object with the new information
     if (detectedMeeting && detectedMeeting.window.id === window.id) {
+      // If URL is still null but we have a title for Google Meet, construct the URL
+      let meetingUrl = window.url;
+      if (!meetingUrl && window.platform === 'google-meet' && window.title) {
+        meetingUrl = `https://meet.google.com/${window.title}`;
+        console.log(`[Main] Constructed Google Meet URL from title in meeting-updated: ${meetingUrl}`);
+      }
+
       detectedMeeting = {
         ...detectedMeeting,
         window: {
           ...detectedMeeting.window,
           title: window.title,
-          url: window.url
+          url: meetingUrl || window.url // Use constructed URL if available, otherwise use window.url
         }
       };
 
       console.log("Updated meeting title:", window.title);
+      if (meetingUrl || window.url) {
+        console.log("Updated meeting URL:", meetingUrl || window.url);
+      }
 
       // If a note has already been created for this meeting, update its title retroactively
       if (window.title && global.activeMeetingIds && global.activeMeetingIds[window.id]) {
@@ -593,8 +806,19 @@ function setupSDKEventListeners() {
             if (meeting) {
               const oldTitle = meeting.title;
               
-              // Update the title
+              // Update the title and URL
               meeting.title = window.title;
+              
+              // Use URL from window, or construct it for Google Meet if not available
+              let meetingUrl = window.url;
+              if (!meetingUrl && window.platform === 'google-meet' && window.title) {
+                meetingUrl = `https://meet.google.com/${window.title}`;
+                console.log(`[Main] Constructed Google Meet URL for existing note: ${meetingUrl}`);
+              }
+              
+              if (meetingUrl) {
+                meeting.url = meetingUrl;
+              }
               
               // Save the updated data
               await fileOperationManager.writeData(meetingsData);
@@ -652,41 +876,10 @@ function setupSDKEventListeners() {
 
     try {
       // Update the note with recording information
+      // Note: The SDK automatically handles the upload when recording ends
+      // because we provided an uploadToken when calling startRecording().
+      // We don't need to manually call uploadRecording() here.
       await updateNoteWithRecordingInfo(evt.window.id);
-
-      // Add a small delay before uploading (good practice for file system operations)
-      setTimeout(async () => {
-        try {
-          // Try to get a new upload token for the upload if needed
-          const uploadData = await createDesktopSdkUpload();
-
-          if (uploadData && uploadData.upload_token) {
-            console.log('Uploading recording with new upload token:', uploadData.upload_token);
-
-            // Log the uploadRecording API call
-            sdkLogger.logApiCall('uploadRecording', {
-              windowId: evt.window.id,
-              uploadToken: `${uploadData.upload_token.substring(0, 8)}...` // Log truncated token for security
-            });
-
-            try {
-              await RecallAiSdk.uploadRecording({
-                windowId: evt.window.id,
-                uploadToken: uploadData.upload_token
-              });
-            } catch (uploadError) {
-              console.error('Error uploading recording with token:', uploadError);
-              // Don't attempt fallback - upload requires a token
-            }
-          } else {
-            console.log('Cannot upload recording without upload token. Please configure RECALLAI_API_KEY.');
-            // Don't attempt upload without token - it will fail
-          }
-        } catch (uploadError) {
-          console.error('Error during upload preparation:', uploadError);
-          // Don't attempt upload if we can't get a token
-        }
-      }, 3000); // Wait 3 seconds before uploading
     } catch (error) {
       console.error("Error handling recording ended:", error);
     }
@@ -761,9 +954,15 @@ function setupSDKEventListeners() {
 
   // Listen for real-time transcript events
   RecallAiSdk.addEventListener('realtime-event', async (evt) => {
-    // Only log non-video frame events to prevent flooding the logger
+    // Log all realtime events for debugging (except video frames to avoid flooding)
     if (evt.event !== 'video_separate_png.data') {
       console.log("Received realtime event:", evt.event);
+      console.log("Realtime event data structure:", JSON.stringify({
+        event: evt.event,
+        hasData: !!evt.data,
+        hasNestedData: !!(evt.data && evt.data.data),
+        windowId: evt.window?.id
+      }, null, 2));
 
       // Log the SDK realtime-event event
       sdkLogger.logEvent('realtime-event', {
@@ -773,17 +972,39 @@ function setupSDKEventListeners() {
     }
 
     // Handle different event types
-    if (evt.event === 'transcript.data' && evt.data && evt.data.data) {
-      await processTranscriptData(evt);
+    // Note: The event structure is evt.event for the event type, and evt.data.data for the actual payload
+    if (evt.event === 'transcript.data') {
+      console.log("[Main] Processing transcript.data event");
+      if (evt.data && evt.data.data) {
+        await processTranscriptData(evt);
+      } else {
+        console.warn("[Main] transcript.data event missing data.data:", evt);
+      }
     }
-    else if (evt.event === 'transcript.provider_data' && evt.data && evt.data.data) {
-      await processTranscriptProviderData(evt);
+    else if (evt.event === 'transcript.provider_data') {
+      console.log("[Main] Processing transcript.provider_data event");
+      if (evt.data && evt.data.data) {
+        await processTranscriptProviderData(evt);
+      } else {
+        console.warn("[Main] transcript.provider_data event missing data.data:", evt);
+      }
     }
-    else if (evt.event === 'participant_events.join' && evt.data && evt.data.data) {
-      await processParticipantJoin(evt);
+    else if (evt.event === 'participant_events.join') {
+      console.log("[Main] Processing participant_events.join event");
+      if (evt.data && evt.data.data) {
+        await processParticipantJoin(evt);
+      } else {
+        console.warn("[Main] participant_events.join event missing data.data:", evt);
+      }
     }
-    else if (evt.event === 'video_separate_png.data' && evt.data && evt.data.data) {
-      await processVideoFrame(evt);
+    else if (evt.event === 'video_separate_png.data') {
+      if (evt.data && evt.data.data) {
+        await processVideoFrame(evt);
+      }
+    }
+    else {
+      // Log any other events we're not explicitly handling
+      console.log("[Main] Unhandled realtime event type:", evt.event, evt);
     }
   });
 
@@ -812,18 +1033,35 @@ function isSDKAvailable() {
   return isSDKSupported && isSDKInitialized;
 }
 
-// Handle saving API configuration
-ipcMain.handle('save-api-config', async (event, apiKey, apiUrl) => {
+// Handle opening login URL
+ipcMain.handle('open-login', async (event) => {
   try {
-    const success = config.saveConfig(apiKey, apiUrl);
+    const backendUrl = config.getBackendUrl();
+    const redirectUrl = encodeURIComponent('/login/desktop?scheme=chatsheet-recall');
+    const loginURL = `${backendUrl}/login?redirectUrl=${redirectUrl}`;
+    
+    console.log('Opening login URL:', loginURL);
+    await shell.openExternal(loginURL);
+    return { success: true };
+  } catch (error) {
+    console.error('Error opening login URL:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Handle saving API configuration (legacy support - now uses session token)
+ipcMain.handle('save-api-config', async (event, sessionToken, backendUrl) => {
+  try {
+    const backendUrlToUse = backendUrl || config.getBackendUrl();
+    const success = config.saveConfig(sessionToken, backendUrlToUse);
     if (success) {
-      console.log('API configuration saved successfully');
+      console.log('Configuration saved successfully');
       return { success: true };
     } else {
       return { success: false, error: 'Failed to save configuration' };
     }
   } catch (error) {
-    console.error('Error saving API config:', error);
+    console.error('Error saving config:', error);
     return { success: false, error: error.message };
   }
 });
@@ -1072,10 +1310,14 @@ ipcMain.handle('startManualRecording', async (event, meetingId) => {
       const key = await RecallAiSdk.prepareDesktopAudioRecording();
       console.log('Prepared desktop audio recording with key:', key);
 
+      // Get meeting URL from the meeting data (if available)
+      const meetingUrl = meeting.url || '';
+
       // Create a recording token
-      const uploadData = await createDesktopSdkUpload();
+      const uploadData = await createDesktopSdkUpload(meetingUrl);
       if (!uploadData || !uploadData.upload_token) {
-        return { success: false, error: 'Failed to create recording token' };
+        // Error notification is already shown in createDesktopSdkUpload function
+        return { success: false, error: 'Failed to create recording token. Please check the error notification for details.' };
       }
 
       // Store the recording ID in the meeting
@@ -1248,6 +1490,70 @@ ipcMain.handle('generateMeetingSummaryStreaming', async (event, meetingId) => {
     // Generate summary with streaming
     const summary = await generateMeetingSummary(meeting, streamProgress);
 
+    // Check if summary generation failed (returns error message)
+    if (summary && summary.startsWith('Error generating summary:')) {
+      console.error('Summary generation failed:', summary);
+      
+      // Extract error message for display
+      const errorMessage = summary.replace('Error generating summary: ', '');
+      
+      // Restore original content (don't save error message as content)
+      // Reload the meeting data to get the original content
+      const originalFileData = await fs.promises.readFile(meetingsFilePath, 'utf8');
+      const originalMeetingsData = JSON.parse(originalFileData);
+      const originalMeeting = originalMeetingsData.pastMeetings.find(m => m.id === meetingId);
+      if (originalMeeting) {
+        meeting.content = originalMeeting.content;
+      }
+      
+      console.log('Summary generation failed, restored original content.');
+      
+      // Show error notification and dialog to user
+      try {
+        let notification = new Notification({
+          title: 'Summary Generation Error',
+          body: `Failed to generate AI summary: ${errorMessage}`,
+          urgency: 'critical'
+        });
+        notification.show();
+        console.log("[Main] Summary error notification shown to user");
+        
+        // Also show a dialog to ensure user sees it
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          dialog.showMessageBox(mainWindow, {
+            type: 'error',
+            title: 'Summary Generation Error',
+            message: 'Failed to generate AI summary',
+            detail: errorMessage,
+            buttons: ['OK']
+          }).catch(err => {
+            console.error("[Main] Failed to show summary error dialog:", err);
+          });
+        }
+      } catch (notifError) {
+        console.error("[Main] Failed to show summary error notification:", notifError);
+        // Fallback: show dialog if notification fails
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          dialog.showMessageBox(mainWindow, {
+            type: 'error',
+            title: 'Summary Generation Error',
+            message: 'Failed to generate AI summary',
+            detail: errorMessage,
+            buttons: ['OK']
+          }).catch(err => {
+            console.error("[Main] Failed to show summary error dialog:", err);
+          });
+        }
+      }
+      
+      // Return error instead of success
+      return {
+        success: false,
+        error: errorMessage
+      };
+    }
+
+    // Summary generation succeeded - update content
     // Make sure the final content is set correctly
     meeting.content = `# ${meetingTitle}\n\n${summary}`;
     meeting.hasSummary = true;
@@ -1339,6 +1645,7 @@ async function createMeetingNoteAndRecord(platformName) {
       content: template,
       recordingId: detectedMeeting.window.id,
       platform: platformName,
+      url: detectedMeeting.window.url || '', // Store meeting URL if available
       transcript: [] // Initialize an empty array for transcript data
     };
 
@@ -1406,12 +1713,27 @@ async function createMeetingNoteAndRecord(platformName) {
     }
 
     try {
+      // Get meeting URL from detected meeting
+      let meetingUrl = '';
+      if (detectedMeeting && detectedMeeting.window) {
+        // First, try to use the URL from the window object
+        if (detectedMeeting.window.url) {
+          meetingUrl = detectedMeeting.window.url;
+        } else if (detectedMeeting.window.platform === 'google-meet' && detectedMeeting.window.title) {
+          // For Google Meet, if URL is not available, construct it from the title (meeting code)
+          // Google Meet titles are typically the meeting code (e.g., "ghf-cpgo-vfx")
+          meetingUrl = `https://meet.google.com/${detectedMeeting.window.title}`;
+          console.log(`[Main] Constructed Google Meet URL from title: ${meetingUrl}`);
+        } else if (detectedMeeting.window.platform === 'zoom' && detectedMeeting.window.title) {
+          console.log(`[Main] Zoom meeting detected but URL not available. Title: ${detectedMeeting.window.title}`);
+        }
+      }
+      
       // Get upload token
-      const uploadData = await createDesktopSdkUpload();
-      console.log('Upload data:', uploadData);
+      const uploadData = await createDesktopSdkUpload(meetingUrl);
       if (!uploadData || !uploadData.upload_token) {
         console.error('Failed to get upload token. Cannot start recording without upload token.');
-        console.error('Please configure RECALLAI_API_KEY in the app settings to enable recording.');
+        // Error notification is already shown in createDesktopSdkUpload function
         // Don't attempt to start recording without a token - the SDK requires it
         return id; // Return the meeting ID even though recording won't start
       } else {
@@ -1679,11 +2001,37 @@ async function processTranscriptData(evt) {
         timestamp: new Date().toISOString()
       });
 
+      // Update the meeting content with the transcript
+      // Format: Replace "Recording: In Progress..." with the transcript
+      const meetingTitle = meeting.title || "Meeting Notes";
+      
+      // Format transcript entries for display
+      const transcriptText = meeting.transcript.map(entry => 
+        `**${entry.speaker}**: ${entry.text}`
+      ).join('\n\n');
+      
+      // Update content: replace "Recording: In Progress..." with transcript
+      if (meeting.content.includes("Recording: In Progress...")) {
+        meeting.content = `# ${meetingTitle}\n\n## Transcript\n\n${transcriptText}`;
+      } else {
+        // If content already has transcript, append the new entry
+        // Extract existing transcript section or append to it
+        if (meeting.content.includes("## Transcript")) {
+          // Replace the transcript section with updated one
+          const beforeTranscript = meeting.content.split("## Transcript")[0];
+          meeting.content = `${beforeTranscript}## Transcript\n\n${transcriptText}`;
+        } else {
+          // Append transcript section if it doesn't exist
+          meeting.content = `${meeting.content}\n\n## Transcript\n\n${transcriptText}`;
+        }
+      }
+
       console.log(`Added transcript data for meeting: ${noteId}`);
 
       // Notify the renderer if this note is currently being edited
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('transcript-updated', noteId);
+        console.log(`Sent transcript update to renderer for meeting: ${noteId}`);
       }
 
       // Return the updated data to be written
@@ -1887,8 +2235,21 @@ async function updateNoteWithRecordingInfo(recordingId) {
     // Save the initial update
     await fileOperationManager.writeData(meetingsData);
 
-    // Generate AI summary if there's a transcript
+    // Generate AI summary if there's a transcript AND API key is configured
     if (meeting.transcript && meeting.transcript.length > 0) {
+      // Check if OpenAI API key is configured before attempting summary generation
+      // Check both the client's apiKey property and environment variables
+      const hasApiKey = (openai.apiKey && openai.apiKey.trim() !== '') || 
+                       process.env.OPENAI_API_KEY || 
+                       process.env.OPENROUTER_API_KEY;
+      
+      if (!hasApiKey) {
+        console.log('OpenAI/OpenRouter API key not configured. Skipping auto-summary generation.');
+        console.log('Users can manually generate summary if they configure an API key via OPENAI_API_KEY or OPENROUTER_API_KEY environment variable.');
+        // Keep the transcript content - don't overwrite it
+        return;
+      }
+
       console.log(`Generating AI summary for meeting ${meeting.id}...`);
 
       // Log summary generation to console instead of showing a notification
@@ -1896,6 +2257,9 @@ async function updateNoteWithRecordingInfo(recordingId) {
 
       // Get meeting title for use in the new content
       const meetingTitle = meeting.title || "Meeting Notes";
+
+      // Store the original content (with transcript) before attempting summary
+      const originalContent = meeting.content;
 
       // Create initial content with placeholder
       meeting.content = `# ${meetingTitle}\nGenerating summary...`;
@@ -1927,53 +2291,160 @@ async function updateNoteWithRecordingInfo(recordingId) {
         }
       };
 
-      // Generate the summary with streaming updates
-      const summary = await generateMeetingSummary(meeting, streamProgress);
-
-      // Check for different possible video file patterns
-      const possibleFilePaths = [
-        path.join(RECORDING_PATH, `${recordingId}.mp4`),
-        path.join(RECORDING_PATH, `macos-desktop-${recordingId}.mp4`),
-        path.join(RECORDING_PATH, `macos-desktop${recordingId}.mp4`),
-        path.join(RECORDING_PATH, `desktop-${recordingId}.mp4`)
-      ];
-
-      // Find the first video file that exists
-      let videoExists = false;
-      let videoFilePath = null;
-
       try {
-        for (const filePath of possibleFilePaths) {
-          if (fs.existsSync(filePath)) {
-            videoExists = true;
-            videoFilePath = filePath;
-            console.log(`Found video file at: ${videoFilePath}`);
-            break;
+        // Generate the summary with streaming updates
+        const summary = await generateMeetingSummary(meeting, streamProgress);
+
+        // Check if summary generation failed (returns error message)
+        if (summary && summary.startsWith('Error generating summary:')) {
+          console.error('Summary generation failed:', summary);
+          
+          // Extract error message for display
+          const errorMessage = summary.replace('Error generating summary: ', '');
+          
+          // Restore original content (with transcript) instead of showing error
+          meeting.content = originalContent;
+          console.log('Restored original transcript content. Summary generation failed.');
+          
+          // Show error notification and dialog to user
+          try {
+            let notification = new Notification({
+              title: 'Summary Generation Error',
+              body: `Failed to generate AI summary: ${errorMessage}`,
+              urgency: 'critical'
+            });
+            notification.show();
+            console.log("[Main] Summary error notification shown to user");
+            
+            // Also show a dialog to ensure user sees it
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              dialog.showMessageBox(mainWindow, {
+                type: 'error',
+                title: 'Summary Generation Error',
+                message: 'Failed to generate AI summary',
+                detail: errorMessage,
+                buttons: ['OK']
+              }).catch(err => {
+                console.error("[Main] Failed to show summary error dialog:", err);
+              });
+            }
+          } catch (notifError) {
+            console.error("[Main] Failed to show summary error notification:", notifError);
+            // Fallback: show dialog if notification fails
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              dialog.showMessageBox(mainWindow, {
+                type: 'error',
+                title: 'Summary Generation Error',
+                message: 'Failed to generate AI summary',
+                detail: errorMessage,
+                buttons: ['OK']
+              }).catch(err => {
+                console.error("[Main] Failed to show summary error dialog:", err);
+              });
+            }
+          }
+        } else {
+          // Summary generation succeeded - update content
+          // Check for different possible video file patterns
+          const possibleFilePaths = [
+            path.join(RECORDING_PATH, `${recordingId}.mp4`),
+            path.join(RECORDING_PATH, `macos-desktop-${recordingId}.mp4`),
+            path.join(RECORDING_PATH, `macos-desktop${recordingId}.mp4`),
+            path.join(RECORDING_PATH, `desktop-${recordingId}.mp4`)
+          ];
+
+          // Find the first video file that exists
+          let videoExists = false;
+          let videoFilePath = null;
+
+          try {
+            for (const filePath of possibleFilePaths) {
+              if (fs.existsSync(filePath)) {
+                videoExists = true;
+                videoFilePath = filePath;
+                console.log(`Found video file at: ${videoFilePath}`);
+                break;
+              }
+            }
+          } catch (err) {
+            console.error('Error checking for video files:', err);
+          }
+
+          console.log("Attempting to embed video file", videoFilePath);
+
+          // Set the content to just the summary
+          meeting.content = `${summary}`;
+
+          // If video exists, store the path separately but don't add it to the content
+          if (videoExists) {
+            meeting.videoPath = videoFilePath; // Store the path for future reference
+            console.log(`Stored video path in meeting object: ${videoFilePath}`);
+          } else {
+            console.log('Video file not found, continuing without embedding');
+          }
+
+          meeting.hasSummary = true;
+
+          // Save the updated data with summary
+          await fileOperationManager.writeData(meetingsData);
+
+          console.log('Updated meeting note with AI summary');
+        }
+      } catch (error) {
+        console.error('Error during summary generation:', error);
+        
+        // Extract user-friendly error message
+        let errorMessage = 'An unexpected error occurred during summary generation';
+        if (error.message) {
+          errorMessage = error.message;
+        } else if (error.status) {
+          errorMessage = `API returned status ${error.status}: ${error.message || 'Unknown error'}`;
+        } else if (error.response) {
+          errorMessage = `Request failed: ${error.response.status} - ${error.response.data?.error?.message || error.message || 'Unknown error'}`;
+        }
+        
+        // Restore original content (with transcript) instead of showing error
+        meeting.content = originalContent;
+        console.log('Restored original transcript content due to error.');
+        
+        // Show error notification and dialog to user
+        try {
+          let notification = new Notification({
+            title: 'Summary Generation Error',
+            body: `Failed to generate AI summary: ${errorMessage}`,
+            urgency: 'critical'
+          });
+          notification.show();
+          console.log("[Main] Summary error notification shown to user (from catch block)");
+          
+          // Also show a dialog to ensure user sees it
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            dialog.showMessageBox(mainWindow, {
+              type: 'error',
+              title: 'Summary Generation Error',
+              message: 'Failed to generate AI summary',
+              detail: errorMessage,
+              buttons: ['OK']
+            }).catch(err => {
+              console.error("[Main] Failed to show summary error dialog:", err);
+            });
+          }
+        } catch (notifError) {
+          console.error("[Main] Failed to show summary error notification:", notifError);
+          // Fallback: show dialog if notification fails
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            dialog.showMessageBox(mainWindow, {
+              type: 'error',
+              title: 'Summary Generation Error',
+              message: 'Failed to generate AI summary',
+              detail: errorMessage,
+              buttons: ['OK']
+            }).catch(err => {
+              console.error("[Main] Failed to show summary error dialog:", err);
+            });
           }
         }
-      } catch (err) {
-        console.error('Error checking for video files:', err);
       }
-
-      console.log("Attempting to embed video file", videoFilePath);
-
-      // Set the content to just the summary
-      meeting.content = `${summary}`;
-
-      // If video exists, store the path separately but don't add it to the content
-      if (videoExists) {
-        meeting.videoPath = videoFilePath; // Store the path for future reference
-        console.log(`Stored video path in meeting object: ${videoFilePath}`);
-      } else {
-        console.log('Video file not found, continuing without embedding');
-      }
-
-      meeting.hasSummary = true;
-
-      // Save the updated data with summary
-      await fileOperationManager.writeData(meetingsData);
-
-      console.log('Updated meeting note with AI summary');
     }
 
     // If the note is currently open, notify the renderer to refresh it

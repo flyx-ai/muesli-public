@@ -23,7 +23,14 @@ module.exports = {
     icon: './muesli',
     extendInfo: {
       NSUserNotificationAlertStyle: "alert",
-    }
+    },
+    // Register deep link protocol for chatsheet-recall://
+    protocols: [
+      {
+        name: 'chatsheet-recall',
+        schemes: ['chatsheet-recall']
+      }
+    ]
   },
   rebuildConfig: {},
   makers: [
