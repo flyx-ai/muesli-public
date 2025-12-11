@@ -1937,11 +1937,22 @@ document.addEventListener('DOMContentLoaded', async () => {
   window.electronAPI.onRecordingStateChange((data) => {
     console.log('Recording state change received:', data);
 
-    // If this state change is for the current note, update the UI
-    if (data.noteId === currentEditingMeetingId) {
-      console.log('Updating recording button for current note');
+    // Update UI if:
+    // 1. The noteId matches the current editing meeting, OR
+    // 2. The recordingId matches the current recording ID
+    const isCurrentNote = data.noteId === currentEditingMeetingId;
+    const isCurrentRecording = data.recordingId === window.currentRecordingId;
+    
+    if (isCurrentNote || isCurrentRecording) {
+      console.log('Updating recording button - noteId match:', isCurrentNote, 'recordingId match:', isCurrentRecording);
       const isActive = data.state === 'recording' || data.state === 'paused';
       updateRecordingButtonUI(isActive, isActive ? data.recordingId : null);
+      
+      // Also update window.currentRecordingId when state becomes idle
+      if (data.state === 'idle') {
+        window.currentRecordingId = null;
+        window.isRecording = false;
+      }
     }
   });
 

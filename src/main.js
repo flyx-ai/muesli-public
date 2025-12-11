@@ -893,6 +893,37 @@ function setupSDKEventListeners() {
     });
 
     try {
+      // Get the meeting note ID associated with this window
+      let noteId = null;
+      if (global.activeMeetingIds && global.activeMeetingIds[evt.window.id]) {
+        noteId = global.activeMeetingIds[evt.window.id].noteId;
+      }
+      
+      // If noteId not found in global tracking, try to find it from meetings data
+      if (!noteId) {
+        try {
+          const fileData = await fs.promises.readFile(meetingsFilePath, 'utf8');
+          const meetingsData = JSON.parse(fileData);
+          const meeting = meetingsData.pastMeetings.find(m => m.recordingId === evt.window.id);
+          if (meeting) {
+            noteId = meeting.id;
+            console.log(`Found noteId ${noteId} from meetings data for recording ${evt.window.id}`);
+          }
+        } catch (error) {
+          console.error('Error looking up noteId from meetings data:', error);
+        }
+      }
+
+      // Notify renderer process that recording has ended (state is now idle)
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('recording-state-change', {
+          recordingId: evt.window.id,
+          state: 'idle',
+          noteId
+        });
+        console.log(`[Main] Sent recording-state-change (idle) for recording ${evt.window.id}, noteId: ${noteId}`);
+      }
+
       // Update the note with recording information
       // Note: The SDK automatically handles the upload when recording ends
       // because we provided an uploadToken when calling startRecording().
