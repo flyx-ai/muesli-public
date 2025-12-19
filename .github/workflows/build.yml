@@ -26,10 +26,43 @@ jobs:
       - name: Install dependencies
         run: npm ci
       
+      - name: Import Apple Code Signing Certificate (macOS only)
+        if: matrix.os == 'macos-latest' && secrets.APPLE_CERTIFICATE
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          # Create a temporary keychain
+          security create-keychain -p "$APPLE_CERTIFICATE_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$APPLE_CERTIFICATE_PASSWORD" build.keychain
+          security set-keychain-settings -t 3600 -u build.keychain
+          
+          # Import certificate
+          echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
+          security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$APPLE_CERTIFICATE_PASSWORD" build.keychain
+          
+          # List imported certificate to get its name (for CSC_NAME)
+          security find-identity -v -p codesigning build.keychain
+          
+          # Clean up
+          rm certificate.p12
+      
       - name: Package app
+        env:
+          # Set keychain path for code signing
+          KEYCHAIN_PATH: ${{ matrix.os == 'macos-latest' && secrets.APPLE_CERTIFICATE && 'build.keychain' || '' }}
         run: npm run package
       
       - name: Create distributables
+        env:
+          # Set code signing environment variables if certificate is available
+          # CSC_NAME should match the certificate name in keychain (e.g., "Developer ID Application: Your Name")
+          # You can find this by running: security find-identity -v -p codesigning
+          CSC_NAME: ${{ secrets.CSC_NAME }}
+          CSC_KEY_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
         run: npm run make
       
       - name: Remove quarantine attribute from DMG (macOS only)
