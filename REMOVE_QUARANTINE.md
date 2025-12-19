@@ -48,19 +48,20 @@ xattr -d com.apple.quarantine ~/Downloads/*.dmg
 
 ---
 
-## Method 2: Using Finder (Only Works After Removing Quarantine)
+## Method 2: Using Finder (Alternative - Works for "Not Opened" Error)
 
-**⚠️ Note:** This method only works if the DMG can be opened. If you see the "file damaged" error with only "Eject" and "Cancel" buttons, you MUST use Method 1 (Terminal) first.
+**⚠️ Note:** This method works for the "Not Opened" / "Apple could not verify" error, but NOT for the "file damaged" error.
 
-After removing quarantine with Method 1, you can use this method for future downloads:
+If you see the "Not Opened" dialog with "Done" and "Move to Trash" buttons:
 
-1. **Right-click** on the DMG file in Finder
-2. Select **"Open"** (not double-click)
-3. macOS will show a security warning
-4. Click **"Open"** in the dialog
-5. The DMG should now open
+1. **Click "Done"** to close the dialog (don't click "Move to Trash")
+2. **Right-click** on the DMG file in Finder
+3. Select **"Open"** (not double-click)
+4. macOS will show a security warning saying it can't verify the developer
+5. Click **"Open"** in the dialog
+6. The DMG should now open
 
-**Note:** This method only works if the DMG isn't blocked by quarantine. For the "file damaged" error, always use Method 1 first.
+**For the "file damaged" error** (with "Eject" and "Cancel" buttons), you MUST use Method 1 (Terminal) first.
 
 ---
 

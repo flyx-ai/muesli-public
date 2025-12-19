@@ -44,14 +44,17 @@ Output files will be in the `out/make` directory:
 
 ### macOS DMG Installation
 
-If you see a "file damaged" error when opening the DMG (dialog shows only "Eject Disk Image" and "Cancel"):
+If you see an error when opening the DMG:
 
-**Required fix:** Open Terminal and run:
-```bash
-xattr -d com.apple.quarantine ~/Downloads/Muesli-*.dmg
-```
+**Error 1: "File damaged"** (shows "Eject" and "Cancel" buttons)
+- **Required fix:** Open Terminal and run:
+  ```bash
+  xattr -d com.apple.quarantine ~/Downloads/Muesli-*.dmg
+  ```
 
-Then try opening the DMG again. The right-click method won't work if you see the "file damaged" error.
+**Error 2: "Not Opened" / "Apple could not verify"** (shows "Done" and "Move to Trash" buttons)
+- **Quick fix:** Click "Done", then right-click the DMG → **Open** → **Open**
+- **Or use Terminal:** Same command as Error 1 above
 
 See [REMOVE_QUARANTINE.md](REMOVE_QUARANTINE.md) for detailed instructions.
 
