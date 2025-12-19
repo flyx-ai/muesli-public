@@ -4,6 +4,10 @@ const { FuseV1Options, FuseVersion } = require('@electron/fuses');
 // Check if we're in CI environment
 const isCI = process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true';
 
+// Check if code signing certificates are available
+// In GitHub Actions, certificates should be set up via secrets if signing is needed
+const hasSigningCert = process.env.APPLE_CERTIFICATE || process.env.CSC_LINK || process.env.CSC_NAME;
+
 module.exports = {
   packagerConfig: {
     asar: {
@@ -39,7 +43,10 @@ module.exports = {
       config: {
         // DMG configuration for macOS
         background: undefined,
-        format: 'UDZO'
+        format: 'UDZO',
+        // Sign the DMG to prevent "file damaged" error on macOS
+        // Only sign if certificates are available (or if not in CI)
+        sign: !isCI || hasSigningCert
       }
     },
     {
