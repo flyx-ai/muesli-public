@@ -20,22 +20,6 @@ npm install
 npm start
 ```
 
-3. On first launch, you'll be prompted to enter your Recall.ai API key in a configuration dialog. The API URL defaults to `https://us-west-2.recall.ai`, but you can change it if needed.
-
-**Note:** No `.env` file is required! Your API key is stored securely in your app's user data directory.
-
-## Configuration
-
-- **API Key**: Enter your Recall.ai API key when prompted on first launch
-- **API URL**: Defaults to `https://us-west-2.recall.ai` (you can change this in the config dialog)
-
-This project also tries to use live transcription with Deepgram by default. To enable this, you'll need to configure your own Deepgram credentials on the Recall.ai dashboard. Follow our [Deepgram real-time transcription guide](https://docs.recall.ai/docs/dsdk-realtime-transcription#/deepgram-transcription-setup) to set this up.
-
-If you want to enable the AI summary after a recording is finished, you can specify an OpenRouter API key in your environment (optional):
-```
-OPENROUTER_KEY=<your key>
-```
-
 ## Building and Packaging
 
 ### Package the App
@@ -57,6 +41,19 @@ npm run make
 Output files will be in the `out/make` directory:
 - **macOS**: `.dmg` file and `.zip` archive
 - **Windows**: `.exe` installer (Squirrel)
+
+### macOS DMG Installation
+
+If you see a "file damaged" error when opening the DMG (dialog shows only "Eject Disk Image" and "Cancel"):
+
+**Required fix:** Open Terminal and run:
+```bash
+xattr -d com.apple.quarantine ~/Downloads/Muesli-*.dmg
+```
+
+Then try opening the DMG again. The right-click method won't work if you see the "file damaged" error.
+
+See [REMOVE_QUARANTINE.md](REMOVE_QUARANTINE.md) for detailed instructions.
 
 ### Platform-Specific Builds
 
