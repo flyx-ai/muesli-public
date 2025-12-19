@@ -27,11 +27,17 @@ jobs:
         run: npm ci
       
       - name: Import Apple Code Signing Certificate (macOS only)
-        if: matrix.os == 'macos-latest' && secrets.APPLE_CERTIFICATE != ''
+        if: matrix.os == 'macos-latest'
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         run: |
+          # Check if certificate is available
+          if [ -z "$APPLE_CERTIFICATE" ] || [ -z "$APPLE_CERTIFICATE_PASSWORD" ]; then
+            echo "No certificate secrets found, skipping certificate import"
+            exit 0
+          fi
+          
           # Create a temporary keychain
           security create-keychain -p "$APPLE_CERTIFICATE_PASSWORD" build.keychain
           security default-keychain -s build.keychain
@@ -48,11 +54,11 @@ jobs:
           
           # Clean up
           rm certificate.p12
+          
+          # Mark that certificate was imported
+          echo "CERTIFICATE_IMPORTED=true" >> $GITHUB_ENV
       
       - name: Package app
-        env:
-          # Set keychain path for code signing
-          KEYCHAIN_PATH: ${{ matrix.os == 'macos-latest' && secrets.APPLE_CERTIFICATE != '' && 'build.keychain' || '' }}
         run: npm run package
       
       - name: Create distributables
@@ -66,18 +72,22 @@ jobs:
         run: npm run make
       
       - name: Ad-hoc sign DMG files (macOS only)
-        if: matrix.os == 'macos-latest' && secrets.APPLE_CERTIFICATE == ''
+        if: matrix.os == 'macos-latest'
         run: |
-          # Ad-hoc sign DMG files to prevent "file damaged" error
+          # Ad-hoc sign DMG files if certificate was not imported
           # This works without a Developer account certificate
-          echo "Ad-hoc signing DMG files..."
-          for dmg in out/make/*.dmg; do
-            if [ -f "$dmg" ]; then
-              echo "Signing: $dmg"
-              # Ad-hoc sign the DMG (uses "-" identity, no certificate needed)
-              codesign --force --deep --sign - "$dmg" 2>/dev/null || echo "Note: Ad-hoc signing may not fully prevent warnings"
-            fi
-          done
+          if [ "$CERTIFICATE_IMPORTED" != "true" ]; then
+            echo "No certificate imported, attempting ad-hoc signing..."
+            for dmg in out/make/*.dmg; do
+              if [ -f "$dmg" ]; then
+                echo "Signing: $dmg"
+                # Ad-hoc sign the DMG (uses "-" identity, no certificate needed)
+                codesign --force --deep --sign - "$dmg" 2>/dev/null || echo "Note: Ad-hoc signing may not fully prevent warnings"
+              fi
+            done
+          else
+            echo "Certificate was imported, skipping ad-hoc signing"
+          fi
       
       - name: Remove quarantine attribute from DMG (macOS only)
         if: matrix.os == 'macos-latest'
