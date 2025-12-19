@@ -69,6 +69,10 @@ jobs:
           CSC_NAME: ${{ secrets.CSC_NAME }}
           CSC_KEY_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          # Notarization credentials (optional - only needed if you want to notarize)
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: npm run make
       
       - name: Ad-hoc sign DMG files (macOS only)

@@ -24,6 +24,14 @@ module.exports = {
         };
       }
     },
+    // Notarization configuration (requires Apple Developer account)
+    // Uses @electron/notarize - set APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, and APPLE_TEAM_ID environment variables
+    osxNotarize: (hasSigningCert && process.env.APPLE_ID && process.env.APPLE_APP_SPECIFIC_PASSWORD && process.env.APPLE_TEAM_ID) ? {
+      tool: 'notarytool', // Use notarytool (recommended for Xcode 13+) or 'legacy' for older systems
+      appleId: process.env.APPLE_ID,
+      appleIdPassword: process.env.APPLE_APP_SPECIFIC_PASSWORD,
+      teamId: process.env.APPLE_TEAM_ID
+    } : undefined,
     icon: './muesli',
     extendInfo: {
       NSUserNotificationAlertStyle: "alert",
