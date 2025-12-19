@@ -460,8 +460,29 @@ const fileOperationManager = {
 
       return data;
     } catch (error) {
+      // If file doesn't exist (ENOENT), create it with empty structure and return it
+      if (error.code === 'ENOENT') {
+        const emptyData = { upcomingMeetings: [], pastMeetings: [] };
+        try {
+          // Ensure the directory exists
+          const dir = path.dirname(meetingsFilePath);
+          if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+          }
+          // Create the file with empty data
+          await fs.promises.writeFile(meetingsFilePath, JSON.stringify(emptyData, null, 2));
+          // Update cache
+          this.cachedData = emptyData;
+          this.lastReadTime = now;
+        } catch (writeError) {
+          // If we can't create the file, just return empty structure
+          console.error('Error creating meetings file:', writeError);
+        }
+        return emptyData;
+      }
+      
+      // For other errors (permission issues, invalid JSON, etc.), log and return empty structure
       console.error('Error reading meetings data:', error);
-      // If file doesn't exist or is invalid, return empty structure
       return { upcomingMeetings: [], pastMeetings: [] };
     }
   },

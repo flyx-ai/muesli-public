@@ -65,12 +65,36 @@ jobs:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
         run: npm run make
       
+      - name: Ad-hoc sign DMG files (macOS only)
+        if: matrix.os == 'macos-latest' && !secrets.APPLE_CERTIFICATE
+        run: |
+          # Ad-hoc sign DMG files to prevent "file damaged" error
+          # This works without a Developer account certificate
+          echo "Ad-hoc signing DMG files..."
+          for dmg in out/make/*.dmg; do
+            if [ -f "$dmg" ]; then
+              echo "Signing: $dmg"
+              # Ad-hoc sign the DMG (uses "-" identity, no certificate needed)
+              codesign --force --deep --sign - "$dmg" 2>/dev/null || echo "Note: Ad-hoc signing may not fully prevent warnings"
+            fi
+          done
+      
       - name: Remove quarantine attribute from DMG (macOS only)
         if: matrix.os == 'macos-latest'
         run: |
-          # Remove quarantine attribute from DMG files to prevent "file damaged" error
-          # This is needed if the DMG wasn't signed
-          find out/make -name "*.dmg" -exec xattr -d com.apple.quarantine {} \; 2>/dev/null || true
+          # Remove quarantine attribute from DMG files
+          # Note: This helps, but macOS may re-add quarantine when downloaded
+          echo "Removing quarantine attributes from DMG files..."
+          for dmg in out/make/*.dmg; do
+            if [ -f "$dmg" ]; then
+              echo "Processing: $dmg"
+              # Remove quarantine attribute
+              xattr -d com.apple.quarantine "$dmg" 2>/dev/null || true
+              # Remove all extended attributes as fallback
+              xattr -c "$dmg" 2>/dev/null || true
+            fi
+          done
+          echo "Quarantine removal complete"
       
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
